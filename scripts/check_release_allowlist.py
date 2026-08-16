@@ -4,7 +4,14 @@
 from pathlib import Path
 import sys
 
-ALLOWED = {"codex.exe", "LICENSE", "NOTICE", "TRADEMARKS.md", "BUILD-INFO"}
+ALLOWED = {
+    "codex.exe",
+    "LICENSE",
+    "NOTICE",
+    "TRADEMARKS.md",
+    "BUILD-INFO.txt",
+    "SHA256SUMS",
+}
 FORBIDDEN_SUFFIXES = (".vsix", ".dmg", ".deb", ".rpm", ".appimage")
 
 root = Path(sys.argv[1] if len(sys.argv) > 1 else "dist/stage")

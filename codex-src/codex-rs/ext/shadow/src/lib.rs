@@ -46,11 +46,14 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::sync::PoisonError;
 use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use tokio::sync::Semaphore;
+use tokio::sync::SemaphorePermit;
 
 pub const DEFAULT_MAX_PARALLEL: usize = 2;
 pub const DEFAULT_REPORT_BATCH_WINDOW_MS: u64 = 400;
@@ -202,14 +205,13 @@ impl RunHandle {
     }
 }
 
-#[derive(Default)]
 pub struct ThreadRuntime {
     epoch: AtomicU64,
     next_run_id: AtomicU64,
     scheduled_turn: Mutex<Option<String>>,
     runs: Mutex<BTreeMap<String, RunHandle>>,
     reports: Mutex<Vec<ShadowReport>>,
-    delivery_lock: tokio::sync::Mutex<()>,
+    delivery_lock: Semaphore,
 }
 
 impl ThreadRuntime {
@@ -220,22 +222,22 @@ impl ThreadRuntime {
     /// Starts a new user epoch and cancels every old shadow run.
     pub fn begin_user_input(&self) -> u64 {
         let epoch = self.epoch.fetch_add(1, Ordering::AcqRel) + 1;
-        for run in self.runs.lock().expect("shadow run lock poisoned").values() {
+        for run in self.runs().values() {
             run.cancel();
         }
-        self.reports.lock().expect("report lock poisoned").clear();
+        self.reports().clear();
         epoch
     }
 
     pub fn cancel_runs(&self) {
-        for run in self.runs.lock().expect("shadow run lock poisoned").values() {
+        for run in self.runs().values() {
             run.cancel();
         }
     }
 
     /// The only lifecycle edge allowed to schedule a heartbeat.
     pub fn schedule_once(&self, completed_turn_id: &str) -> bool {
-        let mut scheduled = self.scheduled_turn.lock().expect("schedule lock poisoned");
+        let mut scheduled = self.scheduled_turn();
         if scheduled.as_deref() == Some(completed_turn_id) {
             return false;
         }
@@ -255,22 +257,16 @@ impl ThreadRuntime {
             shadow_id,
             cancelled: Arc::new(AtomicBool::new(false)),
         };
-        self.runs
-            .lock()
-            .expect("shadow run lock poisoned")
-            .insert(run_id, run.clone());
+        self.runs().insert(run_id, run.clone());
         run
     }
 
     pub fn finish_run(&self, run_id: &str) {
-        self.runs
-            .lock()
-            .expect("shadow run lock poisoned")
-            .remove(run_id);
+        self.runs().remove(run_id);
     }
 
     pub fn active_runs(&self) -> usize {
-        self.runs.lock().expect("shadow run lock poisoned").len()
+        self.runs().len()
     }
 
     /// Atomically checks epoch and expected active turn before queueing a report.
@@ -287,21 +283,16 @@ impl ThreadRuntime {
         if active_turn_id != Some(expected_turn_id) {
             return ReportDisposition::WrongTurn;
         }
-        self.reports
-            .lock()
-            .expect("report lock poisoned")
-            .push(report);
+        self.reports().push(report);
         ReportDisposition::Accepted
     }
 
     pub fn take_reports(&self) -> Vec<ShadowReport> {
-        std::mem::take(&mut *self.reports.lock().expect("report lock poisoned"))
+        std::mem::take(&mut *self.reports())
     }
 
     fn active_run_ids(&self) -> BTreeSet<String> {
-        self.runs
-            .lock()
-            .expect("shadow run lock poisoned")
+        self.runs()
             .values()
             .filter_map(|run| run.shadow_id.clone())
             .collect()
@@ -311,15 +302,45 @@ impl ThreadRuntime {
         if report.epoch != expected_epoch || report.epoch != self.epoch() {
             return false;
         }
-        self.reports
-            .lock()
-            .expect("report lock poisoned")
-            .push(report);
+        self.reports().push(report);
         true
     }
 
     fn take_reports_for_delivery(&self) -> Vec<ShadowReport> {
-        std::mem::take(&mut *self.reports.lock().expect("report lock poisoned"))
+        std::mem::take(&mut *self.reports())
+    }
+
+    async fn delivery_permit(&self) -> Result<SemaphorePermit<'_>, tokio::sync::AcquireError> {
+        self.delivery_lock.acquire().await
+    }
+
+    fn scheduled_turn(&self) -> MutexGuard<'_, Option<String>> {
+        self.scheduled_turn
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn runs(&self) -> MutexGuard<'_, BTreeMap<String, RunHandle>> {
+        self.runs.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn reports(&self) -> MutexGuard<'_, Vec<ShadowReport>> {
+        self.reports
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl Default for ThreadRuntime {
+    fn default() -> Self {
+        Self {
+            epoch: AtomicU64::new(0),
+            next_run_id: AtomicU64::new(0),
+            scheduled_turn: Mutex::new(None),
+            runs: Mutex::new(BTreeMap::new()),
+            reports: Mutex::new(Vec::new()),
+            delivery_lock: Semaphore::new(/*permits*/ 1),
+        }
     }
 }
 
@@ -475,7 +496,7 @@ impl<S> ShadowExtension<S> {
         let mut cache = self
             .registry_cache
             .lock()
-            .expect("shadow registry cache poisoned");
+            .unwrap_or_else(PoisonError::into_inner);
         let previous = cache.get(directory).cloned().unwrap_or_default();
         let invalid_paths = loaded
             .diagnostics
@@ -704,11 +725,17 @@ async fn run_shadow<S>(
     if let Some(model) = shadow.run_with_model.clone() {
         config.model = Some(model);
     }
-    config.permissions = Permissions::from_approval_and_profile(
+    config.permissions = match Permissions::from_approval_and_profile(
         Constrained::allow_any(AskForApproval::Never),
         Constrained::allow_any(PermissionProfile::read_only()),
-    )
-    .expect("built-in read-only shadow permissions must be valid");
+    ) {
+        Ok(permissions) => permissions,
+        Err(error) => {
+            tracing::error!(?error, "invalid built-in shadow permissions");
+            state.runtime.finish_run(&run.run_id);
+            return;
+        }
+    };
     let mut options = StartThreadOptions::new(config);
     options.session_source = Some(SessionSource::SubAgent(SubAgentSource::Other(format!(
         "shadow:{}",
@@ -746,9 +773,8 @@ async fn run_shadow<S>(
             std::time::Duration::from_secs(timeout_seconds),
             async {
                 loop {
-                    match thread.next_event().await?.msg {
-                        EventMsg::TurnComplete(event) => break Ok(event.last_agent_message),
-                        _ => {}
+                    if let EventMsg::TurnComplete(event) = thread.next_event().await?.msg {
+                        break Ok(event.last_agent_message);
                     }
                 }
             },
@@ -791,7 +817,10 @@ async fn run_shadow<S>(
         state.runtime.finish_run(&run.run_id);
         return;
     }
-    let _delivery = state.runtime.delivery_lock.lock().await;
+    let Ok(_delivery) = state.runtime.delivery_permit().await else {
+        state.runtime.finish_run(&run.run_id);
+        return;
+    };
     let reports = state.runtime.take_reports_for_delivery();
     if reports.is_empty() {
         state.runtime.finish_run(&run.run_id);

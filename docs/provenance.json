@@ -33,14 +33,14 @@
   "patch_sha256": [
     "eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6",
     "a75d87d6b6c8a1f3b9cd92d64bf34b5ad3e1934c6dd2d8547855c14551fda0a5",
-    "8f193c127851ace8efe483edb0a8c32c7fc0662093aabc70e6831e3daed7d366"
+    "db581c0a26c90cdbf9854c415d42e590b869016b28b06832a6bb55fc9b345a08"
   ],
   "patches": [
     "patches/goal-old-continuation.patch",
     "patches/goal-transient-continuation.patch",
     "patches/shadow-mind.patch"
   ],
-  "rebuilt_tree_sha256": "af4be5522917e79c34c2160dcacb90057a7993dc0d6d03b3fc96a4177dfc8066",
-  "source_tree_sha256": "aa1b84cb7bd6de3258dcce7f0dcfca8f8ddea5253225e1bdda6787b5490b8d26",
+  "rebuilt_tree_sha256": "052c118666a1ca265c8ccda50b91ac5b8635c81ca66330f67f6ca33e563d082b",
+  "source_tree_sha256": "5faf2517419775034aefabbdb7500f0a087d25076cbfdb00ab3d0c2b4614a901",
   "upstream": "https://github.com/openai/codex.git"
 }

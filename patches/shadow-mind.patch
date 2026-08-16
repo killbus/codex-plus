@@ -2028,3 +2028,15 @@ index abd1386932e1e6fe355135bfd13537f89753a629..d577e92f843e54de5987fda4cd5029f7
          assert!(SlashCommand::Ide.available_during_task());
          assert!(SlashCommand::Title.available_during_task());
          assert!(SlashCommand::Statusline.available_during_task());
+diff --git a/codex-rs/tui/src/bottom_pane/slash_commands.rs b/codex-rs/tui/src/bottom_pane/slash_commands.rs
+index 6ca1ba9..656fe63 100644
+--- a/codex-rs/tui/src/bottom_pane/slash_commands.rs
++++ b/codex-rs/tui/src/bottom_pane/slash_commands.rs
+@@ -308,6 +308,7 @@ mod tests {
+                 SlashCommand::Diff,
+                 SlashCommand::Mention,
+                 SlashCommand::Status,
++                SlashCommand::Shadow,
+                 SlashCommand::Usage,
+             ]
+         );

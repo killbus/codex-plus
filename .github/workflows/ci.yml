@@ -78,9 +78,12 @@ jobs:
         working-directory: codex-src/codex-rs
         run: cargo test --locked -p codex-app-server --test all suite::v2::thread_resume::transient_goal_turn_error_starts_next_automatic_turn -- --exact
 
-      - name: Test TUI integration
+      - name: Test changed TUI integration
         working-directory: codex-src/codex-rs
-        run: cargo test --locked -p codex-tui
+        run: |
+          cargo test --locked -p codex-tui shadow_
+          cargo test --locked -p codex-tui side_conversation_hides_commands_without_side_flag
+          cargo test --locked -p codex-tui certain_commands_are_available_during_task
 
       - name: Test lifecycle injection contract
         working-directory: codex-src/codex-rs

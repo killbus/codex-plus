@@ -658,10 +658,10 @@ index 0000000000000000000000000000000000000000..06f080c53785a43d2c830d557695aae0
 +tempfile = { workspace = true }
 diff --git a/codex-rs/ext/shadow/src/lib.rs b/codex-rs/ext/shadow/src/lib.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..82674c1a43ad8a8e5a9016979eb0ef3a2a001172
+index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698eb0509d82
 --- /dev/null
 +++ b/codex-rs/ext/shadow/src/lib.rs
-@@ -0,0 +1,1126 @@
+@@ -0,0 +1,1124 @@
 +//! Small, host-independent Shadow Mind runtime primitives.
 +//!
 +//! The host integration owns spawning and response injection. This crate owns
@@ -989,9 +989,7 @@ index 0000000000000000000000000000000000000000..82674c1a43ad8a8e5a9016979eb0ef3a
 +    }
 +
 +    fn reports(&self) -> MutexGuard<'_, Vec<ShadowReport>> {
-+        self.reports
-+            .lock()
-+            .unwrap_or_else(PoisonError::into_inner)
++        self.reports.lock().unwrap_or_else(PoisonError::into_inner)
 +    }
 +}
 +

@@ -325,9 +325,7 @@ impl ThreadRuntime {
     }
 
     fn reports(&self) -> MutexGuard<'_, Vec<ShadowReport>> {
-        self.reports
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.reports.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 

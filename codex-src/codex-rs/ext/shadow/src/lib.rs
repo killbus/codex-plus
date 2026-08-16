@@ -184,7 +184,7 @@ pub struct HeartbeatDecision {
     pub selected: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct RunHandle {
     pub run_id: String,
     pub epoch: u64,

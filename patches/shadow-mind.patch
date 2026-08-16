@@ -641,7 +641,7 @@ index 0000000000000000000000000000000000000000..06f080c53785a43d2c830d557695aae0
 +tempfile = { workspace = true }
 diff --git a/codex-rs/ext/shadow/src/lib.rs b/codex-rs/ext/shadow/src/lib.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..b14bba9b8b2c8e5c54154572511c46a1069312db
+index 0000000000000000000000000000000000000000..f9f61e4a4f7a305ab44b637fab8e926fa3fa7f71
 --- /dev/null
 +++ b/codex-rs/ext/shadow/src/lib.rs
 @@ -0,0 +1,1097 @@
@@ -831,7 +831,7 @@ index 0000000000000000000000000000000000000000..b14bba9b8b2c8e5c54154572511c46a1
 +    pub selected: Vec<String>,
 +}
 +
-+#[derive(Clone, Debug, PartialEq, Eq)]
++#[derive(Clone, Debug)]
 +pub struct RunHandle {
 +    pub run_id: String,
 +    pub epoch: u64,

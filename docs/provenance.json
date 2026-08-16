@@ -13,7 +13,7 @@
       "source": null
     },
     "codex-rs/Cargo.lock": {
-      "rebuilt": "07d18cb3d41f57040356af24edeea116b1ae779e950e78a959cdf1773084ccd1",
+      "rebuilt": "34214ee2b9cace59afb45de33b602baea2a3945bdb74dcda189e7f93b10e8e51",
       "source": "0a068199f43e0bec273da16465fb446658a6df18c23c56ac9b7cb953993338bb"
     },
     "codex-rs/vendor/bubblewrap/LICENSE": {
@@ -33,14 +33,14 @@
   "patch_sha256": [
     "eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6",
     "a75d87d6b6c8a1f3b9cd92d64bf34b5ad3e1934c6dd2d8547855c14551fda0a5",
-    "c8015806dc19b04d5f412eb9b84dfd63dcdca678309fc40bfcd343048ff47e9c"
+    "afdf6ff465914394d75f40217ce665baf426119692375d17d586f91816339b44"
   ],
   "patches": [
     "patches/goal-old-continuation.patch",
     "patches/goal-transient-continuation.patch",
     "patches/shadow-mind.patch"
   ],
-  "rebuilt_tree_sha256": "1f4e964ecdfa2d2baba1aade1f83b0bf0d5b1d213f5232e08ddf4e56fd7b09db",
+  "rebuilt_tree_sha256": "2474630120f14ab0108f6439bb7efe12deb57b0460da0c4e6c8d6660edcb9d8c",
   "source_tree_sha256": "cea6187c901f2111b328c3c96a83a8f719a38368e0b96f3791b05f872acf5995",
   "upstream": "https://github.com/openai/codex.git"
 }

@@ -1,15 +1,3 @@
-diff --git a/codex-rs/Cargo.lock b/codex-rs/Cargo.lock
-index ab630ef467daea78c257295423f5fe6df08cdfea..1e4a8d443c4a5042e3799d19881d29aeac8f3c21 100644
---- a/codex-rs/Cargo.lock
-+++ b/codex-rs/Cargo.lock
-@@ -4167,6 +4167,7 @@ dependencies = [
-  "codex-plugin",
-  "codex-protocol",
-  "codex-rollout",
-+ "codex-shadow-extension",
-  "codex-sandboxing",
-  "codex-shell-command",
-  "codex-state",
 diff --git a/codex-rs/Cargo.toml b/codex-rs/Cargo.toml
 index e921ef9993b5f7b0febe349074d65cccaba02bff..6b3ce91412323d5e2cf7d5a88624c16f33082411 100644
 --- a/codex-rs/Cargo.toml

@@ -1149,7 +1149,11 @@ impl ChatWidget {
                                 format!(
                                     "{} ({})",
                                     shadow.name,
-                                    if shadow.enabled { "enabled" } else { "disabled" }
+                                    if shadow.enabled {
+                                        "enabled"
+                                    } else {
+                                        "disabled"
+                                    }
                                 )
                             })
                             .collect::<Vec<_>>();

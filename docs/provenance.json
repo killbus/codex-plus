@@ -13,8 +13,8 @@
       "source": null
     },
     "codex-rs/Cargo.lock": {
-      "rebuilt": "34214ee2b9cace59afb45de33b602baea2a3945bdb74dcda189e7f93b10e8e51",
-      "source": "5a9d9c81f2ea11c7333aaa4103416ff8661b4dfcc0917928bd3cb8ccff25bedc"
+      "rebuilt": "07d18cb3d41f57040356af24edeea116b1ae779e950e78a959cdf1773084ccd1",
+      "source": "0a068199f43e0bec273da16465fb446658a6df18c23c56ac9b7cb953993338bb"
     },
     "codex-rs/vendor/bubblewrap/LICENSE": {
       "rebuilt": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c",
@@ -32,15 +32,15 @@
   "note": "Differences are reported explicitly; no vendored-only comparison is used.",
   "patch_sha256": [
     "eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6",
-    "4bdf292f0e3aaa8a680587b00a063143ee82601d56b29f954c8de32467227e53",
-    "1f45aebba5d56f70fb1ab8318e2d304b7fc0017e89e250ec68d17f61c3a51528"
+    "a75d87d6b6c8a1f3b9cd92d64bf34b5ad3e1934c6dd2d8547855c14551fda0a5",
+    "c8015806dc19b04d5f412eb9b84dfd63dcdca678309fc40bfcd343048ff47e9c"
   ],
   "patches": [
     "patches/goal-old-continuation.patch",
     "patches/goal-transient-continuation.patch",
     "patches/shadow-mind.patch"
   ],
-  "rebuilt_tree_sha256": "5f2adc9e69ca6ec5e399b71d83b0da4f5a30e6a90ffcb6a1dd24c4fcebbd2374",
-  "source_tree_sha256": "621a07e79ee580557f18d1df7482eb3ab6c9b4862cdeb085f7afd7382657a835",
+  "rebuilt_tree_sha256": "1f4e964ecdfa2d2baba1aade1f83b0bf0d5b1d213f5232e08ddf4e56fd7b09db",
+  "source_tree_sha256": "cea6187c901f2111b328c3c96a83a8f719a38368e0b96f3791b05f872acf5995",
   "upstream": "https://github.com/openai/codex.git"
 }

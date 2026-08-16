@@ -381,12 +381,18 @@ mod transient_error_tests {
         assert_status_matrix!(ResponseStreamDisconnected);
         assert_status_matrix!(ResponseTooManyFailedAttempts);
 
-        assert!(!is_transient_goal_error(&CodexErrorInfo::InternalServerError));
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::InternalServerError
+        ));
         assert!(!is_transient_goal_error(
             &CodexErrorInfo::ContextWindowExceeded
         ));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::UsageLimitExceeded));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::SessionBudgetExceeded));
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::UsageLimitExceeded
+        ));
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::SessionBudgetExceeded
+        ));
         assert!(!is_transient_goal_error(&CodexErrorInfo::CyberPolicy));
         assert!(!is_transient_goal_error(&CodexErrorInfo::Unauthorized));
         assert!(!is_transient_goal_error(&CodexErrorInfo::BadRequest));
@@ -396,7 +402,9 @@ mod transient_error_tests {
                 turn_kind: NonSteerableTurnKind::Compact,
             }
         ));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::ThreadRollbackFailed));
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::ThreadRollbackFailed
+        ));
         assert!(!is_transient_goal_error(&CodexErrorInfo::Other));
     }
 }

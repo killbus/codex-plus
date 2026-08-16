@@ -114,9 +114,9 @@ impl Session {
 
         let turn_state = {
             let mut active_turn = self.active_turn.lock().await;
-            if expected_idle_epoch.is_some_and(|expected| {
-                self.idle_epoch.load(Ordering::Acquire) != expected
-            }) {
+            if expected_idle_epoch
+                .is_some_and(|expected| self.idle_epoch.load(Ordering::Acquire) != expected)
+            {
                 return Err(TryStartTurnIfIdleError::new(
                     TryStartTurnIfIdleRejectionReason::StaleIdleEpoch,
                     input,

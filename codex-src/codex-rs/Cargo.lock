@@ -4185,6 +4185,7 @@ dependencies = [
  "codex-plugin",
  "codex-protocol",
  "codex-rollout",
+ "codex-shadow-extension",
  "codex-sandboxing",
  "codex-shell-command",
  "codex-state",

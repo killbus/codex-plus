@@ -1,1 +1,2 @@
 {"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "check 核对基线是否与来源一致（最小差异原则）"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "check 核对回归、格式、lint 与 GitHub Actions 验证证据"}

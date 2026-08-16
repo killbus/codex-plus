@@ -864,6 +864,31 @@ async fn shadow_pause_and_resume_commands_are_visible() {
 }
 
 #[tokio::test]
+#[serial]
+async fn shadow_list_and_status_commands_are_visible() {
+    codex_shadow_extension::resume();
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.set_feature_enabled(Feature::Shadow, /*enabled*/ true);
+    let directory = chat.config.codex_home.join("shadow-minds");
+    std::fs::create_dir_all(&directory).expect("create shadow registry");
+    std::fs::write(
+        directory.join("reviewer.md"),
+        "---\nid: reviewer\nname: Reviewer\n---\nReview the current turn.",
+    )
+    .expect("write shadow definition");
+
+    submit_composer_text(&mut chat, "/shadow list");
+    let cells = drain_insert_history(&mut rx);
+    assert!(lines_to_single_string(&cells[0]).contains("Reviewer (enabled)"));
+
+    submit_composer_text(&mut chat, "/shadow status");
+    let cells = drain_insert_history(&mut rx);
+    let status = lines_to_single_string(&cells[0]);
+    assert!(status.contains("Shadow minds: running (1 loaded, 0 invalid)"));
+    assert!(status.contains("Reviewer (enabled)"));
+}
+
+#[tokio::test]
 async fn goal_edit_slash_command_opens_goal_editor() {
     for thread_id in [Some(ThreadId::new()), None] {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;

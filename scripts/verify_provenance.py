@@ -61,6 +61,7 @@ def main() -> int:
     parser.add_argument("--commit", default=COMMIT)
     parser.add_argument("--patch", type=Path, action="append", default=None)
     parser.add_argument("--output", type=Path, default=Path("docs/provenance.json"))
+    parser.add_argument("--check", action="store_true", help="fail if the recorded output is stale")
     args = parser.parse_args()
 
     source_root = args.source_root.resolve()
@@ -124,8 +125,13 @@ def main() -> int:
             "note": "Differences are reported explicitly; no vendored-only comparison is used.",
         }
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    serialized = json.dumps(result, indent=2, sort_keys=True) + "\n"
+    if args.check:
+        if not args.output.is_file() or args.output.read_text(encoding="utf-8") != serialized:
+            raise SystemExit(f"provenance output is stale: {args.output}")
+    else:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(serialized, encoding="utf-8")
     print(json.dumps({"changed_files": len(changed), "output": str(args.output)}))
     return 0
 

@@ -598,6 +598,7 @@ async fn transient_turn_error_keeps_goal_active_for_idle_continuation() -> anyho
             },
         )
         .await;
+    harness.stop_turn("turn-1").await;
 
     let goal = runtime
         .thread_goals()
@@ -655,12 +656,23 @@ async fn successful_turn_resets_consecutive_transient_failure_limit() -> anyhow:
         harness.stop_turn(turn_id).await;
     }
 
+    harness.start_turn("turn-7", &TokenUsage::default()).await;
+    harness
+        .notify_turn_error(
+            "turn-7",
+            CodexErrorInfo::ResponseStreamDisconnected {
+                http_status_code: Some(503),
+            },
+        )
+        .await;
+    harness.stop_turn("turn-7").await;
+
     let goal = runtime
         .thread_goals()
         .get_thread_goal(thread_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("goal should exist"))?;
-    assert_eq!(codex_state::ThreadGoalStatus::Active, goal.status);
+    assert_eq!(codex_state::ThreadGoalStatus::Blocked, goal.status);
     Ok(())
 }
 

@@ -21,7 +21,8 @@ budgets, authentication, bad requests, sandbox/configuration errors, and
 unattributed internal failures remain terminal. Three consecutive transient
 failures trip a local stop instead of looping forever.
 
-The first release target is a Windows x64 CLI archive containing only the declared
+The first release target uses Rust `1.95.0` to build a Windows x64 CLI archive
+containing only the declared
 binary, attribution, provenance, and checksum files. Build hashes document source,
 patches, lockfile, toolchain, and artifact integrity; they do not claim publisher
 identity or byte-identical deterministic binaries.

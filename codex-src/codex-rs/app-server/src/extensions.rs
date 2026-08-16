@@ -49,9 +49,7 @@ pub(crate) fn thread_extensions<S>(
     dependencies: ThreadExtensionDependencies,
 ) -> Arc<ExtensionRegistry<Config>>
 where
-    S: AgentSpawner<StartThreadOptions, Spawned = NewThread, Error = CodexErr>
-        + Clone
-        + 'static,
+    S: AgentSpawner<StartThreadOptions, Spawned = NewThread, Error = CodexErr> + Clone + 'static,
 {
     let ThreadExtensionDependencies {
         event_sink,

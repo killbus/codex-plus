@@ -1,5 +1,5 @@
 diff --git a/codex-rs/ext/goal/src/extension.rs b/codex-rs/ext/goal/src/extension.rs
-index fc6526d..780d3c8 100644
+index fc6526d8317c75155bade49332d1289d75de6261..5efdda708ed194767a8de96686f02baae8db5738 100644
 --- a/codex-rs/ext/goal/src/extension.rs
 +++ b/codex-rs/ext/goal/src/extension.rs
 @@ -38,6 +38,7 @@ use crate::analytics::GoalAnalytics;
@@ -23,7 +23,7 @@ index fc6526d..780d3c8 100644
          })
      }
  
-@@ -298,38 +300,107 @@ where
+@@ -298,38 +300,115 @@ where
                  tracing::warn!(
                      "failed to account active goal progress after turn abort for {turn_id}: {err}"
                  );
@@ -119,12 +119,18 @@ index fc6526d..780d3c8 100644
 +        assert_status_matrix!(ResponseStreamDisconnected);
 +        assert_status_matrix!(ResponseTooManyFailedAttempts);
 +
-+        assert!(!is_transient_goal_error(&CodexErrorInfo::InternalServerError));
++        assert!(!is_transient_goal_error(
++            &CodexErrorInfo::InternalServerError
++        ));
 +        assert!(!is_transient_goal_error(
 +            &CodexErrorInfo::ContextWindowExceeded
 +        ));
-+        assert!(!is_transient_goal_error(&CodexErrorInfo::UsageLimitExceeded));
-+        assert!(!is_transient_goal_error(&CodexErrorInfo::SessionBudgetExceeded));
++        assert!(!is_transient_goal_error(
++            &CodexErrorInfo::UsageLimitExceeded
++        ));
++        assert!(!is_transient_goal_error(
++            &CodexErrorInfo::SessionBudgetExceeded
++        ));
 +        assert!(!is_transient_goal_error(&CodexErrorInfo::CyberPolicy));
 +        assert!(!is_transient_goal_error(&CodexErrorInfo::Unauthorized));
 +        assert!(!is_transient_goal_error(&CodexErrorInfo::BadRequest));
@@ -134,7 +140,9 @@ index fc6526d..780d3c8 100644
 +                turn_kind: NonSteerableTurnKind::Compact,
 +            }
 +        ));
-+        assert!(!is_transient_goal_error(&CodexErrorInfo::ThreadRollbackFailed));
++        assert!(!is_transient_goal_error(
++            &CodexErrorInfo::ThreadRollbackFailed
++        ));
 +        assert!(!is_transient_goal_error(&CodexErrorInfo::Other));
 +    }
 +}
@@ -143,7 +151,7 @@ index fc6526d..780d3c8 100644
  where
      C: Send + Sync + 'static,
 diff --git a/codex-rs/ext/goal/src/runtime.rs b/codex-rs/ext/goal/src/runtime.rs
-index 31b8b2e..9d62f28 100644
+index 31b8b2eb8ed298b1862f3583370ba76c19680e3e..9d62f282b79c9886e9b4ce08bc3eb44dd53ed71f 100644
 --- a/codex-rs/ext/goal/src/runtime.rs
 +++ b/codex-rs/ext/goal/src/runtime.rs
 @@ -1,6 +1,7 @@
@@ -206,7 +214,7 @@ index 31b8b2e..9d62f28 100644
          self.inner.thread_id
      }
 diff --git a/codex-rs/ext/goal/tests/goal_extension_backend.rs b/codex-rs/ext/goal/tests/goal_extension_backend.rs
-index ffb3176..797d6de 100644
+index ffb31763aa7f32f2ee7b3f28eacfa470745a2915..55c151a1e1eb9403f7706c4694a3012c5aef0268 100644
 --- a/codex-rs/ext/goal/tests/goal_extension_backend.rs
 +++ b/codex-rs/ext/goal/tests/goal_extension_backend.rs
 @@ -574,7 +574,7 @@ async fn turn_error_usage_limit_accounts_progress_and_clears_accounting() -> any
@@ -218,7 +226,7 @@ index ffb3176..797d6de 100644
      let runtime = test_runtime().await?;
      let thread_id = test_thread_id()?;
      seed_thread_metadata(runtime.as_ref(), thread_id).await?;
-@@ -591,7 +591,12 @@ async fn turn_error_keeps_goal_active_for_idle_continuation() -> anyhow::Result<
+@@ -591,8 +591,14 @@ async fn turn_error_keeps_goal_active_for_idle_continuation() -> anyhow::Result<
          .await?;
  
      harness
@@ -230,9 +238,11 @@ index ffb3176..797d6de 100644
 +            },
 +        )
          .await;
++    harness.stop_turn("turn-1").await;
  
      let goal = runtime
-@@ -603,6 +608,91 @@ async fn turn_error_keeps_goal_active_for_idle_continuation() -> anyhow::Result<
+         .thread_goals()
+@@ -603,6 +609,102 @@ async fn turn_error_keeps_goal_active_for_idle_continuation() -> anyhow::Result<
      Ok(())
  }
  
@@ -283,12 +293,23 @@ index ffb3176..797d6de 100644
 +        harness.stop_turn(turn_id).await;
 +    }
 +
++    harness.start_turn("turn-7", &TokenUsage::default()).await;
++    harness
++        .notify_turn_error(
++            "turn-7",
++            CodexErrorInfo::ResponseStreamDisconnected {
++                http_status_code: Some(503),
++            },
++        )
++        .await;
++    harness.stop_turn("turn-7").await;
++
 +    let goal = runtime
 +        .thread_goals()
 +        .get_thread_goal(thread_id)
 +        .await?
 +        .ok_or_else(|| anyhow::anyhow!("goal should exist"))?;
-+    assert_eq!(codex_state::ThreadGoalStatus::Active, goal.status);
++    assert_eq!(codex_state::ThreadGoalStatus::Blocked, goal.status);
 +    Ok(())
 +}
 +

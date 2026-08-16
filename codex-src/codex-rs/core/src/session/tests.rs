@@ -10064,7 +10064,8 @@ async fn inject_if_running_for_turn_rejects_mismatch_and_accepts_match() {
 #[tokio::test]
 async fn try_start_turn_if_idle_for_epoch_rejects_stale_epoch() {
     let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
-    sess.idle_epoch.store(2, std::sync::atomic::Ordering::Release);
+    sess.idle_epoch
+        .store(2, std::sync::atomic::Ordering::Release);
     let item = user_message("stale shadow report");
 
     let err = sess

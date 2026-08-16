@@ -19,9 +19,9 @@ use chrono::Utc;
 use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientInfo;
+use codex_app_server_protocol::CodexErrorInfo;
 use codex_app_server_protocol::CommandExecutionApprovalDecision;
 use codex_app_server_protocol::CommandExecutionRequestApprovalResponse;
-use codex_app_server_protocol::CodexErrorInfo;
 use codex_app_server_protocol::FileChangeApprovalDecision;
 use codex_app_server_protocol::FileChangeRequestApprovalResponse;
 use codex_app_server_protocol::ItemStartedNotification;
@@ -1880,8 +1880,9 @@ async fn transient_goal_turn_error_starts_next_automatic_turn() -> Result<()> {
                         "message": "synthetic transient failure",
                     }
                 })),
-                2 => responses::sse_response(complete_goal.clone())
-                    .set_delay(Duration::from_secs(2)),
+                2 => {
+                    responses::sse_response(complete_goal.clone()).set_delay(Duration::from_secs(2))
+                }
                 3 => responses::sse_response(done.clone()),
                 call => panic!("unexpected model request {call}"),
             }
@@ -1908,17 +1909,19 @@ async fn transient_goal_turn_error_starts_next_automatic_turn() -> Result<()> {
         })
         .await?;
     let TurnStartResponse { turn } = mcp
-        .request(|request_id| codex_app_server_protocol::ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                input: vec![UserInput::Text {
-                    text: "create a goal and keep working".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                ..Default::default()
+        .request(
+            |request_id| codex_app_server_protocol::ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    input: vec![UserInput::Text {
+                        text: "create a goal and keep working".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                },
             },
-        })
+        )
         .await?;
 
     let failed: TurnCompletedNotification = timeout(
@@ -1929,26 +1932,17 @@ async fn transient_goal_turn_error_starts_next_automatic_turn() -> Result<()> {
     assert_eq!(failed.turn.id, turn.id);
     assert_eq!(failed.turn.status, TurnStatus::Failed);
     assert_eq!(
-        failed
-            .turn
-            .error
-            .and_then(|error| error.codex_error_info),
+        failed.turn.error.and_then(|error| error.codex_error_info),
         Some(CodexErrorInfo::ServerOverloaded)
     );
 
-    let continued: TurnStartedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_notification("turn/started"),
-    )
-    .await??;
+    let continued: TurnStartedNotification =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_notification("turn/started")).await??;
     assert_eq!(continued.thread_id, thread.id);
     assert_ne!(continued.turn.id, turn.id);
 
     let get_id = mcp
-        .send_raw_request(
-            "thread/goal/get",
-            Some(json!({ "threadId": thread.id })),
-        )
+        .send_raw_request("thread/goal/get", Some(json!({ "threadId": thread.id })))
         .await?;
     let persisted: codex_app_server_protocol::ThreadGoalGetResponse =
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(get_id)).await??;

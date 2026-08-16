@@ -4,19 +4,19 @@
 //! registry validation, per-thread epochs, exactly-once scheduling, and bounded
 //! report delivery.
 
-use codex_core::config::Config;
-use codex_core::config::Constrained;
-use codex_core::config::Permissions;
 use codex_core::NewThread;
 use codex_core::StartThreadOptions;
 use codex_core::ThreadManager;
+use codex_core::config::Config;
+use codex_core::config::Constrained;
+use codex_core::config::Permissions;
 use codex_extension_api::AgentSpawner;
 use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::ThreadIdleInput;
 use codex_extension_api::ThreadLifecycleContributor;
 use codex_extension_api::ThreadStartInput;
 use codex_extension_api::ThreadStopInput;
-use codex_extension_api::ThreadIdleInput;
 use codex_extension_api::TurnAbortInput;
 use codex_extension_api::TurnErrorInput;
 use codex_extension_api::TurnLifecycleContributor;
@@ -38,8 +38,8 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::hash_map::DefaultHasher;
-use std::future::Future;
 use std::fs;
+use std::future::Future;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::path::Path;
@@ -321,7 +321,6 @@ impl ThreadRuntime {
     fn take_reports_for_delivery(&self) -> Vec<ShadowReport> {
         std::mem::take(&mut *self.reports.lock().expect("report lock poisoned"))
     }
-
 }
 
 #[derive(Debug, Deserialize)]
@@ -353,9 +352,11 @@ pub fn parse_shadow_markdown(source: &str, file_path: PathBuf) -> Result<ShadowD
         .unwrap_or_default()
         .to_owned();
     let id = meta.id.unwrap_or(fallback_id);
-    if id.is_empty() || !id.chars().enumerate().all(|(index, ch)| {
-        ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-' || (index > 0 && ch == '-')
-    }) {
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
+    {
         return Err("id must contain only lowercase letters, digits, '_' or '-'".to_owned());
     }
     let probability = meta.activation_probability.unwrap_or(0.3);
@@ -368,7 +369,9 @@ pub fn parse_shadow_markdown(source: &str, file_path: PathBuf) -> Result<ShadowD
         enabled: meta.enabled.unwrap_or(true),
         debug: meta.debug.unwrap_or(false),
         activation_probability: probability,
-        active_for_models: meta.active_for_models.unwrap_or_else(|| vec!["*".to_owned()]),
+        active_for_models: meta
+            .active_for_models
+            .unwrap_or_else(|| vec!["*".to_owned()]),
         run_with_model: meta.run_with_model,
         thinking_level: meta.thinking_level,
         timeout_seconds: meta.timeout_seconds,
@@ -391,13 +394,19 @@ pub fn load_registry(directory: &Path) -> std::io::Result<RegistrySnapshot> {
     paths.sort();
     let mut ids = BTreeSet::new();
     for path in paths {
-        match fs::read_to_string(&path).map_err(|error| error.to_string()).and_then(|raw| parse_shadow_markdown(&raw, path.clone())) {
+        match fs::read_to_string(&path)
+            .map_err(|error| error.to_string())
+            .and_then(|raw| parse_shadow_markdown(&raw, path.clone()))
+        {
             Ok(shadow) if ids.insert(shadow.id.clone()) => snapshot.shadows.push(shadow),
             Ok(shadow) => snapshot.diagnostics.push(RegistryDiagnostic {
                 file_path: path,
                 message: format!("duplicate shadow id: {}", shadow.id),
             }),
-            Err(message) => snapshot.diagnostics.push(RegistryDiagnostic { file_path: path, message }),
+            Err(message) => snapshot.diagnostics.push(RegistryDiagnostic {
+                file_path: path,
+                message,
+            }),
         }
     }
     Ok(snapshot)
@@ -416,7 +425,11 @@ pub fn decide_heartbeat(
         if !shadow.enabled || active_ids.contains(&shadow.id) {
             continue;
         }
-        if !shadow.active_for_models.iter().any(|model| model == "*" || model == main_model) {
+        if !shadow
+            .active_for_models
+            .iter()
+            .any(|model| model == "*" || model == main_model)
+        {
             continue;
         }
         decision.candidates.push(shadow.id.clone());
@@ -459,7 +472,10 @@ impl<S> ShadowExtension<S> {
 
     fn load_registry(&self, directory: &Path) -> std::io::Result<RegistrySnapshot> {
         let loaded = load_registry(directory)?;
-        let mut cache = self.registry_cache.lock().expect("shadow registry cache poisoned");
+        let mut cache = self
+            .registry_cache
+            .lock()
+            .expect("shadow registry cache poisoned");
         let previous = cache.get(directory).cloned().unwrap_or_default();
         let invalid_paths = loaded
             .diagnostics
@@ -469,12 +485,17 @@ impl<S> ShadowExtension<S> {
         let mut snapshot = loaded;
         for shadow in previous.shadows {
             if invalid_paths.contains(&shadow.file_path)
-                && !snapshot.shadows.iter().any(|current| current.id == shadow.id)
+                && !snapshot
+                    .shadows
+                    .iter()
+                    .any(|current| current.id == shadow.id)
             {
                 snapshot.shadows.push(shadow);
             }
         }
-        snapshot.shadows.sort_by(|left, right| left.id.cmp(&right.id));
+        snapshot
+            .shadows
+            .sort_by(|left, right| left.id.cmp(&right.id));
         cache.insert(directory.to_owned(), snapshot.clone());
         Ok(snapshot)
     }
@@ -542,12 +563,18 @@ where
                 &state.runtime.active_run_ids(),
                 main_model,
                 DEFAULT_MAX_PARALLEL.saturating_sub(state.runtime.active_runs()),
-                registry.shadows.iter().map(|shadow| {
-                    deterministic_roll(&seed, &shadow.id)
-                }),
+                registry
+                    .shadows
+                    .iter()
+                    .map(|shadow| deterministic_roll(&seed, &shadow.id)),
             );
             for shadow_id in decision.selected {
-                let Some(shadow) = registry.shadows.iter().find(|shadow| shadow.id == shadow_id).cloned() else {
+                let Some(shadow) = registry
+                    .shadows
+                    .iter()
+                    .find(|shadow| shadow.id == shadow_id)
+                    .cloned()
+                else {
                     continue;
                 };
                 let run = state.runtime.start_run_for(Some(shadow.id.clone()));
@@ -556,15 +583,7 @@ where
                 let expected_epoch = input.idle_epoch;
                 let state = Arc::clone(&state);
                 tokio::spawn(async move {
-                    run_shadow(
-                        extension,
-                        state,
-                        shadow,
-                        run,
-                        trajectory,
-                        expected_epoch,
-                    )
-                    .await;
+                    run_shadow(extension, state, shadow, run, trajectory, expected_epoch).await;
                 });
             }
         })
@@ -691,9 +710,10 @@ async fn run_shadow<S>(
     )
     .expect("built-in read-only shadow permissions must be valid");
     let mut options = StartThreadOptions::new(config);
-    options.session_source = Some(SessionSource::SubAgent(SubAgentSource::Other(
-        format!("shadow:{}", shadow.id),
-    )));
+    options.session_source = Some(SessionSource::SubAgent(SubAgentSource::Other(format!(
+        "shadow:{}",
+        shadow.id
+    ))));
     options.thread_source = Some(ThreadSource::Feature("shadow".to_owned()));
     let prompt = format_shadow_prompt(&shadow, &trajectory);
     let result = async {
@@ -763,7 +783,10 @@ async fn run_shadow<S>(
         state.runtime.finish_run(&run.run_id);
         return;
     }
-    tokio::time::sleep(std::time::Duration::from_millis(DEFAULT_REPORT_BATCH_WINDOW_MS)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(
+        DEFAULT_REPORT_BATCH_WINDOW_MS,
+    ))
+    .await;
     if run.is_cancelled() {
         state.runtime.finish_run(&run.run_id);
         return;
@@ -818,19 +841,31 @@ fn sanitize_trajectory(history: &codex_extension_api::ConversationHistory) -> St
         }
         let mut text = String::new();
         for part in content {
-            if let ContentItem::InputText { text: part } | ContentItem::OutputText { text: part } = part {
+            if let ContentItem::InputText { text: part } | ContentItem::OutputText { text: part } =
+                part
+            {
                 text.push_str(part);
             }
         }
         let lower = text.to_ascii_lowercase();
         if text.is_empty()
-            || ["api_key", "apikey", "authorization", "password", "secret", "access_token"]
-                .iter()
-                .any(|needle| lower.contains(needle))
+            || [
+                "api_key",
+                "apikey",
+                "authorization",
+                "password",
+                "secret",
+                "access_token",
+            ]
+            .iter()
+            .any(|needle| lower.contains(needle))
         {
             continue;
         }
-        let text = text.chars().take(MAX_TRAJECTORY_ITEM_CHARS).collect::<String>();
+        let text = text
+            .chars()
+            .take(MAX_TRAJECTORY_ITEM_CHARS)
+            .collect::<String>();
         let line = format!("{role}: {text}\n");
         if output.len() + line.len() > MAX_TRAJECTORY_CHARS {
             break;
@@ -857,8 +892,7 @@ pub fn install<S>(
     registry: &mut ExtensionRegistryBuilder<Config>,
     agent_spawner: S,
     thread_manager: Weak<ThreadManager>,
-)
-where
+) where
     S: AgentSpawner<StartThreadOptions, Spawned = NewThread, Error = CodexErr>
         + Send
         + Sync
@@ -888,7 +922,6 @@ mod tests {
         assert_eq!(parse_shadow_command(" STATUS "), Ok(ShadowCommand::Status));
         assert_eq!(parse_shadow_command("pause"), Ok(ShadowCommand::Pause));
         assert!(parse_shadow_command("edit").is_err());
-
     }
 
     #[test]
@@ -934,7 +967,9 @@ mod tests {
             ResponseItem::Message {
                 id: None,
                 role: "user".into(),
-                content: vec![ContentItem::InputText { text: "api_key=hidden".into() }],
+                content: vec![ContentItem::InputText {
+                    text: "api_key=hidden".into(),
+                }],
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             },
@@ -1039,14 +1074,21 @@ mod tests {
             epoch,
             run_id: "1".to_owned(),
         };
-        assert_eq!(ReportDisposition::Stale, runtime.accept_report(report, epoch, "turn", Some("turn")));
+        assert_eq!(
+            ReportDisposition::Stale,
+            runtime.accept_report(report, epoch, "turn", Some("turn"))
+        );
     }
 
     #[test]
     fn registry_reports_duplicate_and_malformed_entries() {
         let directory = tempfile::tempdir().expect("tempdir");
         fs::write(directory.path().join("ok.md"), "---\nid: ok\n---\ncheck").expect("write");
-        fs::write(directory.path().join("duplicate.md"), "---\nid: ok\n---\nagain").expect("write");
+        fs::write(
+            directory.path().join("duplicate.md"),
+            "---\nid: ok\n---\nagain",
+        )
+        .expect("write");
         fs::write(directory.path().join("bad.md"), "not markdown").expect("write");
         let snapshot = load_registry(directory.path()).expect("load");
         assert_eq!(1, snapshot.shadows.len());

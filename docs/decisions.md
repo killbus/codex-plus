@@ -11,5 +11,5 @@
 - Shadow scheduling is one heartbeat at idle, guarded by completed-turn/idle epoch;
   errors and stops only cancel/close state. Reports require atomic active-turn or
   idle-epoch preconditions.
-- Release is Windows x64 CLI-only. The archive uses an exact file allowlist and
-  includes the license/notice/trademark bundle.
+- Release is Windows x64 CLI-only on Rust `1.95.0`. The archive uses an exact file
+  allowlist and includes the license/notice/trademark bundle.

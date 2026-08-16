@@ -46,8 +46,8 @@ pub(crate) struct Session {
     pub(crate) services: SessionServices,
     pub(super) git_enrichment_policy: GitEnrichmentPolicy,
     pub(super) next_internal_sub_id: AtomicU64,
-    pub(super) idle_epoch: AtomicU64,
-    pub(super) last_completed_turn_id: Mutex<Option<String>>,
+    pub(crate) idle_epoch: AtomicU64,
+    pub(crate) last_completed_turn_id: Mutex<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -472,6 +472,11 @@ impl Session {
     pub(crate) async fn originator(&self) -> String {
         let state = self.state.lock().await;
         state.session_configuration.originator.clone()
+    }
+
+    pub(crate) async fn extension_conversation_history(&self) -> codex_tools::ConversationHistory {
+        let state = self.state.lock().await;
+        codex_tools::ConversationHistory::new(state.clone_history().into_raw_items())
     }
 
     #[instrument(name = "session_init", level = "info", skip_all)]

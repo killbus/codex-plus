@@ -368,19 +368,31 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..2eaff371faaa8740a64ad6e9f60d3b93
                  return Err(TryStartTurnIfIdleError::new(
                      TryStartTurnIfIdleRejectionReason::Busy,
 diff --git a/codex-rs/core/src/session/session.rs b/codex-rs/core/src/session/session.rs
-index 910ade583bd94917fa4b784e0ab8b15eae0e688b..367265d085c358503c90a076cf67ab1baac79d8f 100644
+index 910ade583bd94917fa4b784e0ab8b15eae0e688b..4261b0d71ffd402631b00aa381fd5cc74d921468 100644
 --- a/codex-rs/core/src/session/session.rs
 +++ b/codex-rs/core/src/session/session.rs
 @@ -46,6 +46,8 @@ pub(crate) struct Session {
      pub(crate) services: SessionServices,
      pub(super) git_enrichment_policy: GitEnrichmentPolicy,
      pub(super) next_internal_sub_id: AtomicU64,
-+    pub(super) idle_epoch: AtomicU64,
-+    pub(super) last_completed_turn_id: Mutex<Option<String>>,
++    pub(crate) idle_epoch: AtomicU64,
++    pub(crate) last_completed_turn_id: Mutex<Option<String>>,
  }
  
  #[derive(Clone)]
-@@ -1153,6 +1155,8 @@ impl Session {
+@@ -472,6 +474,11 @@ impl Session {
+         state.session_configuration.originator.clone()
+     }
+ 
++    pub(crate) async fn extension_conversation_history(&self) -> codex_tools::ConversationHistory {
++        let state = self.state.lock().await;
++        codex_tools::ConversationHistory::new(state.clone_history().into_raw_items())
++    }
++
+     #[instrument(name = "session_init", level = "info", skip_all)]
+     #[allow(clippy::too_many_arguments)]
+     pub(crate) async fn new(
+@@ -1153,6 +1160,8 @@ impl Session {
                  services,
                  git_enrichment_policy,
                  next_internal_sub_id: AtomicU64::new(0),
@@ -468,7 +480,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..70559453478f1274a8e9c796dfb1ea19
  async fn steer_input_requires_active_turn() {
      let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
 diff --git a/codex-rs/core/src/tasks/lifecycle.rs b/codex-rs/core/src/tasks/lifecycle.rs
-index 789955df1321c8941bb80979f472dbef7492ba23..fc6853e90ab147e7e15db87f6ad80e7e0a937dfb 100644
+index 789955df1321c8941bb80979f472dbef7492ba23..18d9dad4b8199df128b6a0c4cd83c00e7b000ccc 100644
 --- a/codex-rs/core/src/tasks/lifecycle.rs
 +++ b/codex-rs/core/src/tasks/lifecycle.rs
 @@ -2,6 +2,7 @@ use codex_extension_api::ExtensionData;
@@ -495,16 +507,13 @@ index 789955df1321c8941bb80979f472dbef7492ba23..fc6853e90ab147e7e15db87f6ad80e7e
          for contributor in self.services.extensions.turn_lifecycle_contributors() {
              contributor
                  .on_turn_stop(codex_extension_api::TurnStopInput {
-@@ -46,9 +49,18 @@ impl Session {
+@@ -46,9 +49,15 @@ impl Session {
              return;
          }
  
 +        let completed_turn_id = self.last_completed_turn_id.lock().await.clone();
 +        let idle_epoch = self.idle_epoch.load(Ordering::Acquire);
-+        let trajectory = {
-+            let state = self.state.lock().await;
-+            codex_tools::ConversationHistory::new(state.clone_history().into_raw_items())
-+        };
++        let trajectory = self.extension_conversation_history().await;
          for contributor in self.services.extensions.thread_lifecycle_contributors() {
              contributor
                  .on_thread_idle(codex_extension_api::ThreadIdleInput {
@@ -514,7 +523,7 @@ index 789955df1321c8941bb80979f472dbef7492ba23..fc6853e90ab147e7e15db87f6ad80e7e
                      session_store: &self.services.session_extension_data,
                      thread_store: &self.services.thread_extension_data,
                  })
-@@ -61,6 +73,7 @@ impl Session {
+@@ -61,6 +70,7 @@ impl Session {
          reason: TurnAbortReason,
          turn_store: &ExtensionData,
      ) {

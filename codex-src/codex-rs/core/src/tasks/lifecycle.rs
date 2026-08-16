@@ -51,10 +51,7 @@ impl Session {
 
         let completed_turn_id = self.last_completed_turn_id.lock().await.clone();
         let idle_epoch = self.idle_epoch.load(Ordering::Acquire);
-        let trajectory = {
-            let state = self.state.lock().await;
-            codex_tools::ConversationHistory::new(state.clone_history().into_raw_items())
-        };
+        let trajectory = self.extension_conversation_history().await;
         for contributor in self.services.extensions.thread_lifecycle_contributors() {
             contributor
                 .on_thread_idle(codex_extension_api::ThreadIdleInput {

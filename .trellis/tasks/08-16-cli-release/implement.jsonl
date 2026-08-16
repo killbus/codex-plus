@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "release validation and artifact allowlist follow repository quality gates"}
+{"file": ".trellis/tasks/08-16-codex-plus-foundation/design.md", "reason": "release consumes the integrated tree/provenance contract"}

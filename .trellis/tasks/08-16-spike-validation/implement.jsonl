@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "spike 研究要引用既有事实（codex-src 源码），复用已有证据而非重造"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "spike 结论跨内核/TUI/权限层，需要跨层判断框架"}

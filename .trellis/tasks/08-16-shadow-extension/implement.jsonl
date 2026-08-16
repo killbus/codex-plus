@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "实体模型/调度语义复用 pi-shadow-mind，不重造"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "shadow 扩展跨内核 extension/TUI 命令/权限层，需要跨层设计判断"}

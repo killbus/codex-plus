@@ -1,0 +1,133 @@
+diff -ruN /tmp/codex-plus-goal-only.DGBjqE/codex-rs/ext/goal/src/extension.rs codex-src/codex-rs/ext/goal/src/extension.rs
+--- a/codex-rs/ext/goal/src/extension.rs	2026-08-16 03:03:02.333481138 -0400
++++ b/codex-rs/ext/goal/src/extension.rs	2026-08-16 04:17:24.022022377 -0400
+@@ -38,6 +38,7 @@
+ use crate::api::GoalService;
+ use crate::events::GoalEventEmitter;
+ use crate::metrics::GoalMetrics;
++use crate::runtime::ActiveGoalStopReason;
+ use crate::runtime::GoalRuntimeConfig;
+ use crate::runtime::GoalRuntimeHandle;
+ use crate::spec::UPDATE_GOAL_TOOL_NAME;
+@@ -306,30 +307,69 @@
+ 
+     fn on_turn_error<'a>(&'a self, input: TurnErrorInput<'a>) -> ExtensionFuture<'a, ()> {
+         Box::pin(async move {
+-            // Preserve the pre-0.138 goal behavior: terminal turn errors other
+-            // than usage limits leave the goal active so idle continuation can
+-            // start another turn.
+-            if input.error != CodexErrorInfo::UsageLimitExceeded {
+-                return;
+-            }
+-
+             let Some(runtime) = goal_runtime_handle(input.thread_store) else {
+                 return;
+             };
+ 
++            let is_usage_limit = input.error == CodexErrorInfo::UsageLimitExceeded;
++            let is_transient = is_transient_goal_error(&input.error);
++            if is_transient && runtime.allow_transient_continuation() {
++                return;
++            }
++
++            let stop_reason = if is_usage_limit {
++                ActiveGoalStopReason::UsageLimit
++            } else {
++                ActiveGoalStopReason::TurnError
++            };
+             if let Err(err) = runtime
+-                .usage_limit_active_goal_for_turn(input.turn_id)
++                .stop_active_goal_for_turn(input.turn_id, stop_reason)
+                 .await
+             {
+                 tracing::warn!(
+                     error = ?input.error,
+-                    "failed to usage-limit active goal after usage-limit error: {err}"
++                    "failed to stop active goal after turn error: {err}"
+                 );
+             }
+         })
+     }
+ }
+ 
++fn is_transient_goal_error(error: &CodexErrorInfo) -> bool {
++    match error {
++        CodexErrorInfo::ServerOverloaded => true,
++        CodexErrorInfo::HttpConnectionFailed { http_status_code }
++        | CodexErrorInfo::ResponseStreamConnectionFailed { http_status_code }
++        | CodexErrorInfo::ResponseStreamDisconnected { http_status_code }
++        | CodexErrorInfo::ResponseTooManyFailedAttempts { http_status_code } => {
++            http_status_code.is_none_or(|status| status == 429 || status >= 500)
++        }
++        _ => false,
++    }
++}
++
++#[cfg(test)]
++mod transient_error_tests {
++    use super::is_transient_goal_error;
++    use codex_protocol::protocol::CodexErrorInfo;
++
++    #[test]
++    fn allows_only_transient_network_statuses() {
++        assert!(is_transient_goal_error(&CodexErrorInfo::ServerOverloaded));
++        assert!(is_transient_goal_error(&CodexErrorInfo::HttpConnectionFailed {
++            http_status_code: None,
++        }));
++        assert!(is_transient_goal_error(&CodexErrorInfo::ResponseStreamDisconnected {
++            http_status_code: Some(503),
++        }));
++        assert!(!is_transient_goal_error(&CodexErrorInfo::HttpConnectionFailed {
++            http_status_code: Some(400),
++        }));
++        assert!(!is_transient_goal_error(&CodexErrorInfo::InternalServerError));
++        assert!(!is_transient_goal_error(&CodexErrorInfo::UsageLimitExceeded));
++    }
++}
++
+ impl<C> TokenUsageContributor for GoalExtension<C>
+ where
+     C: Send + Sync + 'static,
+diff -ruN /tmp/codex-plus-goal-only.DGBjqE/codex-rs/ext/goal/src/runtime.rs codex-src/codex-rs/ext/goal/src/runtime.rs
+--- a/codex-rs/ext/goal/src/runtime.rs	2026-08-16 03:03:02.333481138 -0400
++++ b/codex-rs/ext/goal/src/runtime.rs	2026-08-16 04:16:36.271925940 -0400
+@@ -1,6 +1,7 @@
+ use std::sync::Arc;
+ use std::sync::Weak;
+ use std::sync::atomic::AtomicBool;
++use std::sync::atomic::AtomicU32;
+ use std::sync::atomic::Ordering;
+ 
+ use codex_core::ThreadManager;
+@@ -47,6 +48,7 @@
+     enabled: AtomicBool,
+     tools_available_for_thread: bool,
+     goal_state_lock: Semaphore,
++    transient_failures: AtomicU32,
+ }
+ 
+ pub(crate) struct AccountedGoalProgress {
+@@ -99,6 +101,7 @@
+                 enabled: AtomicBool::new(config.enabled),
+                 tools_available_for_thread: config.tools_available_for_thread,
+                 goal_state_lock: Semaphore::new(/*permits*/ 1),
++                transient_failures: AtomicU32::new(0),
+             }),
+         }
+     }
+@@ -115,6 +118,15 @@
+         self.is_enabled() && self.inner.tools_available_for_thread
+     }
+ 
++    /// Keep automatic continuation bounded across repeated transient failures.
++    pub(crate) fn allow_transient_continuation(&self) -> bool {
++        const MAX_CONSECUTIVE_TRANSIENT_FAILURES: u32 = 3;
++        self.inner
++            .transient_failures
++            .fetch_add(1, Ordering::Relaxed)
++            < MAX_CONSECUTIVE_TRANSIENT_FAILURES
++    }
++
+     pub(crate) fn thread_id(&self) -> ThreadId {
+         self.inner.thread_id
+     }

@@ -1,0 +1,69 @@
+diff --git a/codex-rs/ext/goal/src/extension.rs b/codex-rs/ext/goal/src/extension.rs
+index 4fa1081db..fc6526d83 100644
+--- a/codex-rs/ext/goal/src/extension.rs
++++ b/codex-rs/ext/goal/src/extension.rs
+@@ -38,7 +38,6 @@ use crate::analytics::GoalAnalytics;
+ use crate::api::GoalService;
+ use crate::events::GoalEventEmitter;
+ use crate::metrics::GoalMetrics;
+-use crate::runtime::ActiveGoalStopReason;
+ use crate::runtime::GoalRuntimeConfig;
+ use crate::runtime::GoalRuntimeHandle;
+ use crate::spec::UPDATE_GOAL_TOOL_NAME;
+@@ -307,25 +306,24 @@ where
+ 
+     fn on_turn_error<'a>(&'a self, input: TurnErrorInput<'a>) -> ExtensionFuture<'a, ()> {
+         Box::pin(async move {
++            // Preserve the pre-0.138 goal behavior: terminal turn errors other
++            // than usage limits leave the goal active so idle continuation can
++            // start another turn.
++            if input.error != CodexErrorInfo::UsageLimitExceeded {
++                return;
++            }
++
+             let Some(runtime) = goal_runtime_handle(input.thread_store) else {
+                 return;
+             };
+ 
+-            let reason = match input.error {
+-                CodexErrorInfo::UsageLimitExceeded => ActiveGoalStopReason::UsageLimit,
+-                // The turn has ended because the error was non-retryable or its
+-                // retries were exhausted. Block the goal to prevent automatic
+-                // continuation from looping and consuming tokens, as can happen
+-                // with compaction errors.
+-                _ => ActiveGoalStopReason::TurnError,
+-            };
+             if let Err(err) = runtime
+-                .stop_active_goal_for_turn(input.turn_id, reason)
++                .usage_limit_active_goal_for_turn(input.turn_id)
+                 .await
+             {
+                 tracing::warn!(
+                     error = ?input.error,
+-                    "failed to stop active goal after turn error: {err}"
++                    "failed to usage-limit active goal after usage-limit error: {err}"
+                 );
+             }
+         })
+diff --git a/codex-rs/ext/goal/tests/goal_extension_backend.rs b/codex-rs/ext/goal/tests/goal_extension_backend.rs
+index 206216058..ffb31763a 100644
+--- a/codex-rs/ext/goal/tests/goal_extension_backend.rs
++++ b/codex-rs/ext/goal/tests/goal_extension_backend.rs
+@@ -574,7 +574,7 @@ async fn turn_error_usage_limit_accounts_progress_and_clears_accounting() -> any
+ }
+ 
+ #[tokio::test]
+-async fn turn_error_blocks_goal() -> anyhow::Result<()> {
++async fn turn_error_keeps_goal_active_for_idle_continuation() -> anyhow::Result<()> {
+     let runtime = test_runtime().await?;
+     let thread_id = test_thread_id()?;
+     seed_thread_metadata(runtime.as_ref(), thread_id).await?;
+@@ -599,7 +599,7 @@ async fn turn_error_blocks_goal() -> anyhow::Result<()> {
+         .get_thread_goal(thread_id)
+         .await?
+         .ok_or_else(|| anyhow::anyhow!("goal should exist"))?;
+-    assert_eq!(codex_state::ThreadGoalStatus::Blocked, goal.status);
++    assert_eq!(codex_state::ThreadGoalStatus::Active, goal.status);
+     Ok(())
+ }
+ 

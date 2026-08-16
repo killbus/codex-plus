@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "check tests the release allowlist, checksum, and failure-before-publish gate"}
+{"file": ".trellis/tasks/08-16-codex-plus-foundation/prd.md", "reason": "check verifies the CLI-only release acceptance criteria"}

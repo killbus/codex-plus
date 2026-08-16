@@ -1,0 +1,6 @@
+codex-plus is an unofficial downstream build. It is not produced, sponsored,
+endorsed, or maintained by OpenAI.
+
+The integrated source tree retains the upstream Codex LICENSE and NOTICE files.
+Release artifacts must include those files and the applicable notices for all
+third-party Cargo dependencies.

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.95.0
+
+jobs:
+  rust:
+    name: Rust checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang cmake libssl-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codex-src/codex-rs
+
+      - name: Check formatting
+        working-directory: codex-src/codex-rs
+        run: cargo fmt --all -- --check
+
+      - name: Verify provenance and patch chain
+        run: python scripts/verify_provenance.py --patch patches/goal-old-continuation.patch --patch patches/goal-transient-continuation.patch
+
+      - name: Check Shadow extension
+        working-directory: codex-src/codex-rs
+        run: cargo check -p codex-shadow-extension
+
+      - name: Check app-server integration
+        working-directory: codex-src/codex-rs
+        run: cargo check -p codex-app-server
+
+      - name: Test Shadow extension
+        working-directory: codex-src/codex-rs
+        run: cargo test -p codex-shadow-extension
+
+      - name: Test Goal extension
+        working-directory: codex-src/codex-rs
+        run: cargo test -p codex-goal-extension
+
+      - name: Test lifecycle injection contract
+        working-directory: codex-src/codex-rs
+        run: cargo test -p codex-core inject_if_running_for_turn --lib
+
+      - name: Lint changed extensions
+        working-directory: codex-src/codex-rs
+        run: cargo clippy -p codex-shadow-extension -p codex-goal-extension --all-targets -- -D warnings

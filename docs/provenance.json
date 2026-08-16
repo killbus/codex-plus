@@ -1,0 +1,37 @@
+{
+  "changed_files": {
+    ".vscode/extensions.json": {
+      "rebuilt": "34fc5ecf7fd4a117d516816ecdfb1eeacb41054798175028cab628ae32d71fb8",
+      "source": null
+    },
+    ".vscode/launch.json": {
+      "rebuilt": "55445eadb89fc5f48ce621a44ed20a095750520a2aa8034f08bcf66fffac1523",
+      "source": null
+    },
+    ".vscode/settings.json": {
+      "rebuilt": "e76b84ceeab82a7b4696c334da288058dabb9f0f875615a260455c8c2f521ab1",
+      "source": null
+    },
+    "codex-rs/Cargo.lock": {
+      "rebuilt": "34214ee2b9cace59afb45de33b602baea2a3945bdb74dcda189e7f93b10e8e51",
+      "source": "af0984d9fa348f507f8e8810cba1606b5f9fb97b40d09db04da509c16224ed9c"
+    },
+    "codex-rs/vendor/bubblewrap/LICENSE": {
+      "rebuilt": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c",
+      "source": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
+    }
+  },
+  "commit": "bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb",
+  "note": "Differences are reported explicitly; no vendored-only comparison is used.",
+  "patch_sha256": [
+    "eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6",
+    "cdc00fbbc76c1575d16837a49cf20d44ac87968424d7033bad44db1074d303c5"
+  ],
+  "patches": [
+    "/home/agent/Src/codex-plus/patches/goal-old-continuation.patch",
+    "/home/agent/Src/codex-plus/patches/goal-transient-continuation.patch"
+  ],
+  "rebuilt_tree_sha256": "60a03f0ee3385d292e765621634839a48191c58b5875fa075af27cee93d798ce",
+  "source_tree_sha256": "1b06362ae6abbe39aa36a9f922f8c1e0cc6a9d5c94be1bd27fd510ca5a6ff384",
+  "upstream": "https://github.com/openai/codex.git"
+}

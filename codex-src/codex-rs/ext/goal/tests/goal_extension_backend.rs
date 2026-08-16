@@ -574,7 +574,7 @@ async fn turn_error_usage_limit_accounts_progress_and_clears_accounting() -> any
 }
 
 #[tokio::test]
-async fn turn_error_keeps_goal_active_for_idle_continuation() -> anyhow::Result<()> {
+async fn transient_turn_error_keeps_goal_active_for_idle_continuation() -> anyhow::Result<()> {
     let runtime = test_runtime().await?;
     let thread_id = test_thread_id()?;
     seed_thread_metadata(runtime.as_ref(), thread_id).await?;
@@ -591,7 +591,12 @@ async fn turn_error_keeps_goal_active_for_idle_continuation() -> anyhow::Result<
         .await?;
 
     harness
-        .notify_turn_error("turn-1", CodexErrorInfo::Other)
+        .notify_turn_error(
+            "turn-1",
+            CodexErrorInfo::ResponseStreamDisconnected {
+                http_status_code: Some(503),
+            },
+        )
         .await;
 
     let goal = runtime
@@ -600,6 +605,91 @@ async fn turn_error_keeps_goal_active_for_idle_continuation() -> anyhow::Result<
         .await?
         .ok_or_else(|| anyhow::anyhow!("goal should exist"))?;
     assert_eq!(codex_state::ThreadGoalStatus::Active, goal.status);
+    Ok(())
+}
+
+#[tokio::test]
+async fn successful_turn_resets_consecutive_transient_failure_limit() -> anyhow::Result<()> {
+    let runtime = test_runtime().await?;
+    let thread_id = test_thread_id()?;
+    seed_thread_metadata(runtime.as_ref(), thread_id).await?;
+    let harness = GoalExtensionHarness::new(runtime.clone(), thread_id).await?;
+
+    harness.start_turn("turn-1", &TokenUsage::default()).await;
+    let tools = harness.tools();
+    tool_by_name(&tools, "create_goal")
+        .handle(tool_call(
+            "create_goal",
+            "call-create-goal",
+            json!({ "objective": "ship goal extension backend" }),
+        ))
+        .await?;
+    harness.stop_turn("turn-1").await;
+
+    harness.start_turn("turn-2", &TokenUsage::default()).await;
+    harness
+        .notify_turn_error(
+            "turn-2",
+            CodexErrorInfo::ResponseStreamDisconnected {
+                http_status_code: Some(503),
+            },
+        )
+        .await;
+    harness.stop_turn("turn-2").await;
+
+    // This clean turn must clear the previous transient failure before the
+    // next run of transient errors is counted.
+    harness.start_turn("turn-3", &TokenUsage::default()).await;
+    harness.stop_turn("turn-3").await;
+
+    for turn_id in ["turn-4", "turn-5", "turn-6"] {
+        harness.start_turn(turn_id, &TokenUsage::default()).await;
+        harness
+            .notify_turn_error(
+                turn_id,
+                CodexErrorInfo::ResponseStreamDisconnected {
+                    http_status_code: Some(503),
+                },
+            )
+            .await;
+        harness.stop_turn(turn_id).await;
+    }
+
+    let goal = runtime
+        .thread_goals()
+        .get_thread_goal(thread_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("goal should exist"))?;
+    assert_eq!(codex_state::ThreadGoalStatus::Active, goal.status);
+    Ok(())
+}
+
+#[tokio::test]
+async fn turn_error_unknown_blocks_goal_without_continuation() -> anyhow::Result<()> {
+    let runtime = test_runtime().await?;
+    let thread_id = test_thread_id()?;
+    seed_thread_metadata(runtime.as_ref(), thread_id).await?;
+    let harness = GoalExtensionHarness::new(runtime.clone(), thread_id).await?;
+
+    harness.start_turn("turn-1", &TokenUsage::default()).await;
+    let tools = harness.tools();
+    tool_by_name(&tools, "create_goal")
+        .handle(tool_call(
+            "create_goal",
+            "call-create-goal",
+            json!({ "objective": "ship goal extension backend" }),
+        ))
+        .await?;
+    harness
+        .notify_turn_error("turn-1", CodexErrorInfo::Other)
+        .await;
+
+    let goal = runtime
+        .thread_goals()
+        .get_thread_goal(thread_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("goal should exist"))?;
+    assert_eq!(codex_state::ThreadGoalStatus::Blocked, goal.status);
     Ok(())
 }
 

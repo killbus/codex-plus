@@ -6,6 +6,5 @@ Windows x64. It stages an allowlisted directory, copies license/notice/trademark
 files, writes BUILD-INFO, computes SHA-256, verifies the allowlist, then uploads one
 archive and its checksum to the release channel.
 
-The workflow never references the source VSIX workflow or its download URL. Release
-permissions are read-only checkout plus release upload. A failed test, build,
-allowlist, or checksum exits before publication.
+Release permissions are read-only checkout plus release upload. A failed test,
+build, allowlist, or checksum exits before publication.

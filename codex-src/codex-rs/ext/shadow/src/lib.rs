@@ -4,7 +4,6 @@
 //! registry validation, per-thread epochs, exactly-once scheduling, and bounded
 //! report delivery.
 
-use serde::Deserialize;
 use codex_core::config::Config;
 use codex_core::config::Constrained;
 use codex_core::config::Permissions;
@@ -22,30 +21,118 @@ use codex_extension_api::TurnAbortInput;
 use codex_extension_api::TurnErrorInput;
 use codex_extension_api::TurnLifecycleContributor;
 use codex_extension_api::TurnStartInput;
+use codex_features::Feature;
+use codex_protocol::ThreadId;
+use codex_protocol::error::CodexErr;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
-use codex_protocol::ThreadId;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::user_input::UserInput;
-use codex_protocol::error::CodexErr;
-use codex_protocol::protocol::AskForApproval;
-use codex_protocol::models::PermissionProfile;
-use codex_features::Feature;
-use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::future::Future;
+use std::fs;
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::Weak;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use tokio::sync::Semaphore;
 
 pub const DEFAULT_MAX_PARALLEL: usize = 2;
 pub const DEFAULT_REPORT_BATCH_WINDOW_MS: u64 = 400;
+pub const MAX_TRAJECTORY_CHARS: usize = 32_000;
+pub const MAX_TRAJECTORY_ITEM_CHARS: usize = 4_000;
+
+static SHADOW_PAUSED: AtomicBool = AtomicBool::new(false);
+
+/// Process-wide operator control used by the small `/shadow` management surface.
+/// Pausing prevents new heartbeats; already-running shadows finish normally.
+pub fn pause() {
+    SHADOW_PAUSED.store(true, Ordering::Release);
+}
+
+pub fn resume() {
+    SHADOW_PAUSED.store(false, Ordering::Release);
+}
+
+pub fn is_paused() -> bool {
+    SHADOW_PAUSED.load(Ordering::Acquire)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShadowCommand {
+    List,
+    Status,
+    Pause,
+    Resume,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum WaitOutcome<T> {
+    Completed(T),
+    Cancelled,
+    TimedOut,
+}
+
+async fn wait_for_run<F, T>(
+    run: &RunHandle,
+    timeout: std::time::Duration,
+    future: F,
+) -> WaitOutcome<T>
+where
+    F: Future<Output = T>,
+{
+    match tokio::time::timeout(timeout, async {
+        tokio::select! {
+            value = future => WaitOutcome::Completed(value),
+            _ = async {
+                while !run.is_cancelled() {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            } => WaitOutcome::Cancelled,
+        }
+    })
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(_) => WaitOutcome::TimedOut,
+    }
+}
+
+pub fn parse_shadow_command(input: &str) -> Result<ShadowCommand, &'static str> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "list" => Ok(ShadowCommand::List),
+        "status" => Ok(ShadowCommand::Status),
+        "pause" => Ok(ShadowCommand::Pause),
+        "resume" => Ok(ShadowCommand::Resume),
+        _ => Err("Usage: /shadow [list|status|pause|resume]"),
+    }
+}
+
+pub fn is_shadow_session_source(source: &SessionSource) -> bool {
+    matches!(
+        source,
+        SessionSource::SubAgent(SubAgentSource::Other(value)) if value.starts_with("shadow:")
+    )
+}
+
+fn is_non_root_source(source: &SessionSource) -> bool {
+    matches!(source, SessionSource::SubAgent(_))
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShadowDefinition {
@@ -406,12 +493,12 @@ where
     ) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             let enabled = input.config.features.enabled(Feature::Shadow)
-                && !matches!(input.session_source, SessionSource::SubAgent(_));
+                && !is_non_root_source(input.session_source);
             let Ok(thread_id) = ThreadId::from_string(input.thread_store.level_id()) else {
                 return;
             };
             input.thread_store.insert(ShadowThreadState {
-                eligible: !matches!(input.session_source, SessionSource::SubAgent(_)),
+                eligible: !is_non_root_source(input.session_source),
                 enabled: AtomicBool::new(enabled),
                 thread_id,
                 config: input.config.clone(),
@@ -427,6 +514,9 @@ where
                 return;
             };
             if !state.enabled.load(Ordering::Acquire) {
+                return;
+            }
+            if is_paused() {
                 return;
             }
             let Some(completed_turn_id) = input.completed_turn_id else {
@@ -451,7 +541,7 @@ where
                 &registry.shadows,
                 &state.runtime.active_run_ids(),
                 main_model,
-                DEFAULT_MAX_PARALLEL,
+                DEFAULT_MAX_PARALLEL.saturating_sub(state.runtime.active_runs()),
                 registry.shadows.iter().map(|shadow| {
                     deterministic_roll(&seed, &shadow.id)
                 }),
@@ -631,31 +721,24 @@ async fn run_shadow<S>(
             )
             .await?;
         let timeout_seconds = shadow.timeout_seconds.unwrap_or(120);
-        let completion = tokio::time::timeout(
+        let completion = wait_for_run(
+            &run,
             std::time::Duration::from_secs(timeout_seconds),
             async {
-                tokio::select! {
-                    result = async {
-                        loop {
-                            match thread.next_event().await?.msg {
-                                EventMsg::TurnComplete(event) => break Ok(event.last_agent_message),
-                                _ => {}
-                            }
-                        }
-                    } => result,
-                    _ = async {
-                        while !run.is_cancelled() {
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        }
-                    } => Err(CodexErr::Fatal("shadow run cancelled".to_owned())),
+                loop {
+                    match thread.next_event().await?.msg {
+                        EventMsg::TurnComplete(event) => break Ok(event.last_agent_message),
+                        _ => {}
+                    }
                 }
-            }
+            },
         )
         .await;
         let _ = thread.shutdown_and_wait().await;
         match completion {
-            Ok(result) => result,
-            Err(_) => Err(CodexErr::Fatal("shadow run timed out".to_owned())),
+            WaitOutcome::Completed(result) => result,
+            WaitOutcome::Cancelled => Err(CodexErr::Fatal("shadow run cancelled".to_owned())),
+            WaitOutcome::TimedOut => Err(CodexErr::Fatal("shadow run timed out".to_owned())),
         }
     }
     .await;
@@ -739,12 +822,17 @@ fn sanitize_trajectory(history: &codex_extension_api::ConversationHistory) -> St
                 text.push_str(part);
             }
         }
-        if text.is_empty() || text.to_ascii_lowercase().contains("api_key") || text.to_ascii_lowercase().contains("authorization") {
+        let lower = text.to_ascii_lowercase();
+        if text.is_empty()
+            || ["api_key", "apikey", "authorization", "password", "secret", "access_token"]
+                .iter()
+                .any(|needle| lower.contains(needle))
+        {
             continue;
         }
-        let text = text.chars().take(4_000).collect::<String>();
+        let text = text.chars().take(MAX_TRAJECTORY_ITEM_CHARS).collect::<String>();
         let line = format!("{role}: {text}\n");
-        if output.len() + line.len() > 32_000 {
+        if output.len() + line.len() > MAX_TRAJECTORY_CHARS {
             break;
         }
         output.insert_str(0, &line);
@@ -792,6 +880,151 @@ mod tests {
         assert!(runtime.schedule_once("turn-1"));
         assert!(!runtime.schedule_once("turn-1"));
         assert!(runtime.schedule_once("turn-2"));
+    }
+
+    #[test]
+    fn shadow_commands_parse() {
+        assert_eq!(parse_shadow_command("list"), Ok(ShadowCommand::List));
+        assert_eq!(parse_shadow_command(" STATUS "), Ok(ShadowCommand::Status));
+        assert_eq!(parse_shadow_command("pause"), Ok(ShadowCommand::Pause));
+        assert!(parse_shadow_command("edit").is_err());
+
+    }
+
+    #[test]
+    fn shadow_sources_cannot_recurse() {
+        let source = SessionSource::SubAgent(SubAgentSource::Other("shadow:reviewer".into()));
+        assert!(is_shadow_session_source(&source));
+        assert!(is_non_root_source(&source));
+        let guardian = SessionSource::SubAgent(SubAgentSource::Other("guardian".into()));
+        assert!(!is_shadow_session_source(&guardian));
+        assert!(is_non_root_source(&guardian));
+    }
+
+    #[test]
+    fn heartbeat_respects_available_slots() {
+        let shadow = |id: &str| ShadowDefinition {
+            id: id.into(),
+            name: id.into(),
+            enabled: true,
+            debug: false,
+            activation_probability: 1.0,
+            active_for_models: vec!["*".into()],
+            run_with_model: None,
+            thinking_level: None,
+            timeout_seconds: None,
+            tools: Vec::new(),
+            prompt: "report".into(),
+            file_path: PathBuf::from(format!("{id}.md")),
+        };
+        let shadows = vec![shadow("a"), shadow("b"), shadow("c")];
+        let decision = decide_heartbeat(
+            &shadows,
+            &BTreeSet::new(),
+            "model",
+            2,
+            std::iter::repeat(0.0),
+        );
+        assert_eq!(decision.selected, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn trajectory_redacts_secrets_and_is_bounded() {
+        let history = codex_extension_api::ConversationHistory::new(vec![
+            ResponseItem::Message {
+                id: None,
+                role: "user".into(),
+                content: vec![ContentItem::InputText { text: "api_key=hidden".into() }],
+                phase: None,
+                internal_chat_message_metadata_passthrough: None,
+            },
+            ResponseItem::Message {
+                id: None,
+                role: "user".into(),
+                content: vec![ContentItem::InputText {
+                    text: "x".repeat(MAX_TRAJECTORY_ITEM_CHARS + 100),
+                }],
+                phase: None,
+                internal_chat_message_metadata_passthrough: None,
+            },
+        ]);
+        let output = sanitize_trajectory(&history);
+        assert!(!output.contains("api_key"));
+        assert!(output.len() <= MAX_TRAJECTORY_CHARS);
+    }
+
+    #[tokio::test]
+    async fn cancellation_and_timeout_are_distinct() {
+        let runtime = ThreadRuntime::default();
+        let run = runtime.start_run();
+        run.cancel();
+        assert_eq!(
+            wait_for_run(
+                &run,
+                std::time::Duration::from_secs(1),
+                std::future::pending::<()>(),
+            )
+            .await,
+            WaitOutcome::Cancelled
+        );
+
+        let run = runtime.start_run();
+        assert_eq!(
+            wait_for_run(
+                &run,
+                std::time::Duration::ZERO,
+                std::future::pending::<()>(),
+            )
+            .await,
+            WaitOutcome::TimedOut
+        );
+    }
+
+    #[test]
+    fn registry_cache_keeps_last_known_good_entry() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("reviewer.md");
+        fs::write(&path, "---\nid: reviewer\n---\ncheck").expect("write");
+        let extension = ShadowExtension::new((), Weak::new());
+        assert_eq!(
+            extension
+                .load_registry(directory.path())
+                .expect("load")
+                .shadows
+                .len(),
+            1
+        );
+
+        fs::write(&path, "malformed").expect("write");
+        let snapshot = extension.load_registry(directory.path()).expect("reload");
+        assert_eq!(snapshot.shadows.len(), 1);
+        assert_eq!(snapshot.diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn registry_parses_supported_frontmatter() {
+        let shadow = parse_shadow_markdown(
+            "---\nid: reviewer\nname: Reviewer\nenabled: false\ndebug: true\nactivation_probability: 0.5\nactive_for_models: [gpt-5]\nrun_with_model: gpt-5-mini\nthinking_level: high\ntimeout_seconds: 9\ntools: [search]\n---\ncheck",
+            PathBuf::from("reviewer.md"),
+        )
+        .expect("parse");
+        assert_eq!(
+            shadow,
+            ShadowDefinition {
+                id: "reviewer".into(),
+                name: "Reviewer".into(),
+                enabled: false,
+                debug: true,
+                activation_probability: 0.5,
+                active_for_models: vec!["gpt-5".into()],
+                run_with_model: Some("gpt-5-mini".into()),
+                thinking_level: Some("high".into()),
+                timeout_seconds: Some(9),
+                tools: vec!["search".into()],
+                prompt: "check".into(),
+                file_path: PathBuf::from("reviewer.md"),
+            }
+        );
     }
 
     #[test]

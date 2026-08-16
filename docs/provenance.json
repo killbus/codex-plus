@@ -14,7 +14,7 @@
     },
     "codex-rs/Cargo.lock": {
       "rebuilt": "34214ee2b9cace59afb45de33b602baea2a3945bdb74dcda189e7f93b10e8e51",
-      "source": "af0984d9fa348f507f8e8810cba1606b5f9fb97b40d09db04da509c16224ed9c"
+      "source": "5a9d9c81f2ea11c7333aaa4103416ff8661b4dfcc0917928bd3cb8ccff25bedc"
     },
     "codex-rs/vendor/bubblewrap/LICENSE": {
       "rebuilt": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c",
@@ -22,16 +22,25 @@
     }
   },
   "commit": "bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb",
+  "expected_materialization_differences": [
+    ".vscode/extensions.json",
+    ".vscode/launch.json",
+    ".vscode/settings.json",
+    "codex-rs/Cargo.lock",
+    "codex-rs/vendor/bubblewrap/LICENSE"
+  ],
   "note": "Differences are reported explicitly; no vendored-only comparison is used.",
   "patch_sha256": [
     "eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6",
-    "cdc00fbbc76c1575d16837a49cf20d44ac87968424d7033bad44db1074d303c5"
+    "4bdf292f0e3aaa8a680587b00a063143ee82601d56b29f954c8de32467227e53",
+    "1f45aebba5d56f70fb1ab8318e2d304b7fc0017e89e250ec68d17f61c3a51528"
   ],
   "patches": [
-    "/home/agent/Src/codex-plus/patches/goal-old-continuation.patch",
-    "/home/agent/Src/codex-plus/patches/goal-transient-continuation.patch"
+    "patches/goal-old-continuation.patch",
+    "patches/goal-transient-continuation.patch",
+    "patches/shadow-mind.patch"
   ],
-  "rebuilt_tree_sha256": "60a03f0ee3385d292e765621634839a48191c58b5875fa075af27cee93d798ce",
-  "source_tree_sha256": "1b06362ae6abbe39aa36a9f922f8c1e0cc6a9d5c94be1bd27fd510ca5a6ff384",
+  "rebuilt_tree_sha256": "5f2adc9e69ca6ec5e399b71d83b0da4f5a30e6a90ffcb6a1dd24c4fcebbd2374",
+  "source_tree_sha256": "621a07e79ee580557f18d1df7482eb3ab6c9b4862cdeb085f7afd7382657a835",
   "upstream": "https://github.com/openai/codex.git"
 }

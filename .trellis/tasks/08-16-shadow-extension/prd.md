@@ -52,7 +52,7 @@ per-thread 临时运行实例、受控并发、报告投递和 `/shadow` 管理�
 ## Out of Scope
 
 Shadow 间通信、学习/Gate、项目级 registry、跨次记忆、复杂 entity CRUD、主模型
-thinking 暴露和官方 VSIX/桌面产物。
+thinking 暴露和非 CLI 发行物。
 
 ## Dependencies / order
 

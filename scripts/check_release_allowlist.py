@@ -12,11 +12,9 @@ ALLOWED = {
     "BUILD-INFO.txt",
     "SHA256SUMS",
 }
-FORBIDDEN_SUFFIXES = (".vsix", ".dmg", ".deb", ".rpm", ".appimage")
-
 root = Path(sys.argv[1] if len(sys.argv) > 1 else "dist/stage")
 files = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
-bad = sorted(path for path in files if path not in ALLOWED or path.lower().endswith(FORBIDDEN_SUFFIXES))
+bad = sorted(files - ALLOWED)
 if bad:
     print("release allowlist violation:", *bad, sep="\n", file=sys.stderr)
     raise SystemExit(1)

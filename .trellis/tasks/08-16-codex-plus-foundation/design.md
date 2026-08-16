@@ -46,8 +46,7 @@ concrete variants rather than `Other`.
 The release child runs the fixed Windows x64 toolchain, tests Goal and shadow,
 builds `codex-cli`, copies the root and source license/notice bundle plus a
 non-official trademark statement, writes BUILD-INFO with source/patch/toolchain
-hashes, computes SHA-256, and validates an output allowlist. It never downloads,
-opens, or packages a VSIX.
+hashes, computes SHA-256, and validates an exact output allowlist.
 
 ## Rollback
 

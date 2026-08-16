@@ -21,8 +21,8 @@ budgets, authentication, bad requests, sandbox/configuration errors, and
 unattributed internal failures remain terminal. Three consecutive transient
 failures trip a local stop instead of looping forever.
 
-The first release target is a Windows x64 CLI archive. It does not contain VSIX,
-desktop, marketplace, or official OpenAI branding. Build hashes document source,
+The first release target is a Windows x64 CLI archive containing only the declared
+binary, attribution, provenance, and checksum files. Build hashes document source,
 patches, lockfile, toolchain, and artifact integrity; they do not claim publisher
 identity or byte-identical deterministic binaries.
 

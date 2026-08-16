@@ -271,9 +271,10 @@ where
                 tracing::warn!(
                     "failed to account active goal progress at turn stop for {turn_id}: {err}"
                 );
-                return;
+            } else {
+                runtime.accounting_state().finish_turn(turn_id);
             }
-            runtime.accounting_state().finish_turn(turn_id);
+            runtime.finish_turn();
         })
     }
 
@@ -299,9 +300,10 @@ where
                 tracing::warn!(
                     "failed to account active goal progress after turn abort for {turn_id}: {err}"
                 );
-                return;
+            } else {
+                runtime.accounting_state().finish_turn(turn_id);
             }
-            runtime.accounting_state().finish_turn(turn_id);
+            runtime.reset_after_aborted_turn();
         })
     }
 
@@ -311,6 +313,7 @@ where
                 return;
             };
 
+            runtime.mark_turn_error();
             let is_usage_limit = input.error == CodexErrorInfo::UsageLimitExceeded;
             let is_transient = is_transient_goal_error(&input.error);
             if is_transient && runtime.allow_transient_continuation() {
@@ -352,21 +355,49 @@ fn is_transient_goal_error(error: &CodexErrorInfo) -> bool {
 mod transient_error_tests {
     use super::is_transient_goal_error;
     use codex_protocol::protocol::CodexErrorInfo;
+    use codex_protocol::protocol::NonSteerableTurnKind;
 
     #[test]
-    fn allows_only_transient_network_statuses() {
+    fn allows_only_explicit_transient_error_matrix() {
         assert!(is_transient_goal_error(&CodexErrorInfo::ServerOverloaded));
-        assert!(is_transient_goal_error(&CodexErrorInfo::HttpConnectionFailed {
-            http_status_code: None,
-        }));
-        assert!(is_transient_goal_error(&CodexErrorInfo::ResponseStreamDisconnected {
-            http_status_code: Some(503),
-        }));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::HttpConnectionFailed {
-            http_status_code: Some(400),
-        }));
+
+        macro_rules! assert_status_matrix {
+            ($variant:ident) => {
+                for status in [None, Some(429), Some(500), Some(503)] {
+                    assert!(is_transient_goal_error(&CodexErrorInfo::$variant {
+                        http_status_code: status,
+                    }));
+                }
+                for status in [Some(400), Some(401), Some(499)] {
+                    assert!(!is_transient_goal_error(&CodexErrorInfo::$variant {
+                        http_status_code: status,
+                    }));
+                }
+            };
+        }
+
+        assert_status_matrix!(HttpConnectionFailed);
+        assert_status_matrix!(ResponseStreamConnectionFailed);
+        assert_status_matrix!(ResponseStreamDisconnected);
+        assert_status_matrix!(ResponseTooManyFailedAttempts);
+
         assert!(!is_transient_goal_error(&CodexErrorInfo::InternalServerError));
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::ContextWindowExceeded
+        ));
         assert!(!is_transient_goal_error(&CodexErrorInfo::UsageLimitExceeded));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::SessionBudgetExceeded));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::CyberPolicy));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::Unauthorized));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::BadRequest));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::SandboxError));
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::ActiveTurnNotSteerable {
+                turn_kind: NonSteerableTurnKind::Compact,
+            }
+        ));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::ThreadRollbackFailed));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::Other));
     }
 }
 

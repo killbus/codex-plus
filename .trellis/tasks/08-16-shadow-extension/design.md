@@ -47,3 +47,7 @@ Invalid registry entries are skipped without disabling valid entries. A failed c
 run emits bounded metadata and releases resources. Removing the feature registration
 and patch restores the goal-only binary; no persistent user registry is rewritten by
 rollback.
+
+The first release's `/shadow pause|resume` control is process-local and therefore
+applies to the embedded app-server. Remote app-server control requires a host RPC
+bridge and is not claimed by R8.

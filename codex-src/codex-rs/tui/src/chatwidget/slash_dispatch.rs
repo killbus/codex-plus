@@ -14,6 +14,7 @@ use crate::bottom_pane::slash_commands::SlashCommandItem;
 use crate::bottom_pane::slash_commands::find_slash_command;
 use crate::goal_display::GOAL_USAGE;
 use crate::goal_files::GoalDraft;
+use codex_shadow_extension::ShadowCommand;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SlashCommandDispatchSource {
@@ -447,6 +448,7 @@ impl ChatWidget {
                     );
                 }
             }
+            SlashCommand::Shadow => self.handle_shadow_command("status"),
             SlashCommand::Usage => {
                 if self.ensure_usage_command_available() {
                     self.open_usage_menu();
@@ -671,6 +673,7 @@ impl ChatWidget {
         } = prepared;
         let trimmed = args.trim();
         match cmd {
+            SlashCommand::Shadow => self.handle_shadow_command(trimmed),
             SlashCommand::Usage => {
                 if self.ensure_usage_command_available() {
                     match tokens::TokenActivityView::parse(trimmed) {
@@ -1057,6 +1060,7 @@ impl ChatWidget {
         match cmd {
             SlashCommand::Ide
             | SlashCommand::Status
+            | SlashCommand::Shadow
             | SlashCommand::Usage
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
@@ -1110,6 +1114,77 @@ impl ChatWidget {
             | SlashCommand::Statusline
             | SlashCommand::Theme
             | SlashCommand::Pets => QueueDrain::Stop,
+        }
+    }
+
+    fn handle_shadow_command(&mut self, input: &str) {
+        if !self.config.features.enabled(Feature::Shadow) {
+            self.add_error_message("Shadow minds are disabled.".to_string());
+            return;
+        }
+        let command = match codex_shadow_extension::parse_shadow_command(input) {
+            Ok(command) => command,
+            Err(usage) => {
+                self.add_error_message(usage.to_string());
+                return;
+            }
+        };
+        match command {
+            ShadowCommand::Pause => {
+                codex_shadow_extension::pause();
+                self.add_info_message("Shadow minds paused.".to_string(), None);
+            }
+            ShadowCommand::Resume => {
+                codex_shadow_extension::resume();
+                self.add_info_message("Shadow minds resumed.".to_string(), None);
+            }
+            ShadowCommand::List | ShadowCommand::Status => {
+                let directory = self.config.codex_home.join("shadow-minds");
+                match codex_shadow_extension::load_registry(&directory) {
+                    Ok(snapshot) => {
+                        let mut lines = snapshot
+                            .shadows
+                            .iter()
+                            .map(|shadow| {
+                                format!(
+                                    "{} ({})",
+                                    shadow.name,
+                                    if shadow.enabled { "enabled" } else { "disabled" }
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        lines.extend(snapshot.diagnostics.iter().map(|diagnostic| {
+                            format!(
+                                "Invalid {}: {}",
+                                diagnostic.file_path.display(),
+                                diagnostic.message
+                            )
+                        }));
+                        if command == ShadowCommand::Status {
+                            lines.insert(
+                                0,
+                                format!(
+                                    "Shadow minds: {} ({} loaded, {} invalid)",
+                                    if codex_shadow_extension::is_paused() {
+                                        "paused"
+                                    } else {
+                                        "running"
+                                    },
+                                    snapshot.shadows.len(),
+                                    snapshot.diagnostics.len()
+                                ),
+                            );
+                        } else if lines.is_empty() {
+                            lines.push("No shadow minds found.".to_string());
+                        }
+                        self.add_info_message(lines.join("\n"), None);
+                    }
+                    Err(error) => self.add_error_message(format!(
+                        "Failed to read {}: {error}",
+                        directory.display()
+                    )),
+                }
+            }
         }
     }
 

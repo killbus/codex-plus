@@ -23,7 +23,8 @@ jobs:
         run: |
           python scripts/verify_provenance.py \
             --patch patches/goal-old-continuation.patch \
-            --patch patches/goal-transient-continuation.patch
+            --patch patches/goal-transient-continuation.patch \
+            --patch patches/shadow-mind.patch
       - name: Test Goal extension
         shell: bash
         working-directory: codex-src/codex-rs

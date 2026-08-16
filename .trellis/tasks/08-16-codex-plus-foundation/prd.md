@@ -34,7 +34,8 @@
   `on_turn_stop` 负责取消/收尾，按 `turn_id` 去重。
 - shadow 报告必须经带 `expected_turn_id` 的原子注入入口；没有前提检查的
   `inject_if_running` 不得用于报告投递。
-- release 首期只发布 Windows x64 CLI archive；输出白名单禁止 VSIX/桌面产物。
+- release 首期只发布 Windows x64 CLI archive；输出使用精确文件白名单。VSIX
+  不设独立门禁，也不进入本地 Trellis 之外的项目上下文。
 - child DAG：`spike || inherit -> shadow -> cli-release`；parent 只负责骨架、
   决策记录和最终集成验收。
 
@@ -53,7 +54,7 @@
   heartbeat、并发槽位、取消/超时/递归防护、原子 epoch 投递、`/shadow`
   list/status/pause/resume，以及 pi 语义 conformance tests。
 - R5 release：固定源码/锁文件/toolchain 的可重建 CLI archive，附 LICENSE、
-  NOTICE、非官方商标声明、SHA-256 和 BUILD-INFO；不包含 VSIX/桌面资产。
+  NOTICE、非官方商标声明、SHA-256 和 BUILD-INFO；拒绝任何未声明文件。
 - R6 规划工件：spike 有四项 file:line research；inherit/shadow/release
   各有 prd/design/implement 和真实 check/implement context；parent 汇总跨
   child 验收。
@@ -83,14 +84,14 @@
 - [ ] AC5 shadow tests prove one heartbeat per main turn, cancellation/timeout,
   max parallel execution, atomic expected-turn rejection, and no shadow recursion.
 - [ ] AC6 release workflow emits only the declared CLI/license/checksum metadata
-  whitelist and fails when any VSIX/desktop file is present.
+  whitelist and fails when any undeclared file is present.
 - [ ] AC7 all child planning artifacts and check manifests are present; child
   dependencies follow `(spike || inherit) -> shadow -> cli-release`.
 
 ## Out of Scope
 
-- Official VSIX, desktop application, marketplace packaging, OpenAI branding or
-  implied endorsement.
+- Non-CLI distribution, marketplace packaging, OpenAI branding or implied
+  endorsement.
 - Deterministic byte-identical binaries; this task promises fixed-source/toolchain
   rebuildability and records artifact hashes.
 - Shadow-to-shadow communication, learning/Gate scheduling, project-level registry,

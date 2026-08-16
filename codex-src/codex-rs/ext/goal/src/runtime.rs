@@ -49,6 +49,7 @@ struct GoalRuntimeInner {
     tools_available_for_thread: bool,
     goal_state_lock: Semaphore,
     transient_failures: AtomicU32,
+    turn_had_error: AtomicBool,
 }
 
 pub(crate) struct AccountedGoalProgress {
@@ -102,6 +103,7 @@ impl GoalRuntimeHandle {
                 tools_available_for_thread: config.tools_available_for_thread,
                 goal_state_lock: Semaphore::new(/*permits*/ 1),
                 transient_failures: AtomicU32::new(0),
+                turn_had_error: AtomicBool::new(false),
             }),
         }
     }
@@ -125,6 +127,23 @@ impl GoalRuntimeHandle {
             .transient_failures
             .fetch_add(1, Ordering::Relaxed)
             < MAX_CONSECUTIVE_TRANSIENT_FAILURES
+    }
+
+    pub(crate) fn mark_turn_error(&self) {
+        self.inner.turn_had_error.store(true, Ordering::Release);
+    }
+
+    /// A clean turn breaks the consecutive transient-failure sequence.
+    pub(crate) fn finish_turn(&self) {
+        if !self.inner.turn_had_error.swap(false, Ordering::AcqRel) {
+            self.inner.transient_failures.store(0, Ordering::Release);
+        }
+    }
+
+    pub(crate) fn reset_after_aborted_turn(&self) {
+        // An abort is a lifecycle boundary, not a transient failure.
+        self.inner.turn_had_error.store(false, Ordering::Release);
+        self.inner.transient_failures.store(0, Ordering::Release);
     }
 
     pub(crate) fn thread_id(&self) -> ThreadId {

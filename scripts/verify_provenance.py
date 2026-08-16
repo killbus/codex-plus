@@ -13,6 +13,15 @@ from pathlib import Path
 
 UPSTREAM = "https://github.com/openai/codex.git"
 COMMIT = "bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb"
+EXPECTED_MATERIALIZATION_DIFFERENCES = frozenset(
+    {
+        ".vscode/extensions.json",
+        ".vscode/launch.json",
+        ".vscode/settings.json",
+        "codex-rs/Cargo.lock",
+        "codex-rs/vendor/bubblewrap/LICENSE",
+    }
+)
 
 
 def run(*args: str, cwd: Path | None = None) -> str:
@@ -25,6 +34,13 @@ def digest(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def display_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return path.name
 
 
 def manifest(root: Path) -> dict[str, str]:
@@ -61,7 +77,19 @@ def main() -> int:
             work.mkdir()
             run("tar", "-xf", str(Path(temp) / "upstream.tar"), "-C", str(work))
         else:
-            run("git", "clone", "--quiet", "--no-checkout", args.upstream, str(work))
+            run("git", "init", "--quiet", str(work))
+            run("git", "-C", str(work), "remote", "add", "origin", args.upstream)
+            run(
+                "git",
+                "-C",
+                str(work),
+                "fetch",
+                "--quiet",
+                "--filter=blob:none",
+                "--no-tags",
+                "origin",
+                args.commit,
+            )
             run("git", "-C", str(work), "checkout", "--quiet", "--detach", args.commit)
         for patch in patches:
             run("git", "apply", "--check", str(patch), cwd=work)
@@ -74,14 +102,25 @@ def main() -> int:
             for key in sorted(set(source_manifest) | set(rebuilt_manifest))
             if source_manifest.get(key) != rebuilt_manifest.get(key)
         }
+        changed_paths = set(changed)
+        unexpected = sorted(changed_paths - EXPECTED_MATERIALIZATION_DIFFERENCES)
+        missing = sorted(EXPECTED_MATERIALIZATION_DIFFERENCES - changed_paths)
+        if unexpected or missing:
+            details = []
+            if unexpected:
+                details.append(f"unexpected tree differences: {', '.join(unexpected)}")
+            if missing:
+                details.append(f"missing expected materialization differences: {', '.join(missing)}")
+            raise SystemExit("provenance verification failed: " + "; ".join(details))
         result = {
             "upstream": args.upstream,
             "commit": args.commit,
-            "patches": [str(path) for path in patches],
+            "patches": [display_path(path) for path in patches],
             "patch_sha256": [digest(path) for path in patches],
             "source_tree_sha256": digest_manifest(source_manifest),
             "rebuilt_tree_sha256": digest_manifest(rebuilt_manifest),
             "changed_files": changed,
+            "expected_materialization_differences": sorted(EXPECTED_MATERIALIZATION_DIFFERENCES),
             "note": "Differences are reported explicitly; no vendored-only comparison is used.",
         }
 

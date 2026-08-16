@@ -21,6 +21,7 @@ use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::CommandExecutionApprovalDecision;
 use codex_app_server_protocol::CommandExecutionRequestApprovalResponse;
+use codex_app_server_protocol::CodexErrorInfo;
 use codex_app_server_protocol::FileChangeApprovalDecision;
 use codex_app_server_protocol::FileChangeRequestApprovalResponse;
 use codex_app_server_protocol::ItemStartedNotification;
@@ -56,9 +57,11 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::ThreadUnsubscribeParams;
+use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnItemsView;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
+use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use codex_config::types::AuthCredentialsStoreMode;
@@ -108,6 +111,9 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -1836,6 +1842,128 @@ async fn thread_goal_set_edits_objective_without_resetting_usage() -> Result<()>
     assert_eq!(edit.goal.time_used_seconds, 12);
     assert_eq!(edit.goal.created_at, goal.goal.created_at);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn transient_goal_turn_error_starts_next_automatic_turn() -> Result<()> {
+    let server = MockServer::start().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let create_goal = responses::sse(vec![
+        responses::ev_response_created("create-goal"),
+        responses::ev_function_call(
+            "call-create-goal",
+            "create_goal",
+            r#"{"objective":"finish the lifecycle test"}"#,
+        ),
+        responses::ev_completed("create-goal"),
+    ]);
+    let complete_goal = responses::sse(vec![
+        responses::ev_response_created("complete-goal"),
+        responses::ev_function_call(
+            "call-complete-goal",
+            "update_goal",
+            r#"{"status":"complete"}"#,
+        ),
+        responses::ev_completed("complete-goal"),
+    ]);
+    let done = create_final_assistant_message_sse_response("Done")?;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with({
+            let calls = Arc::clone(&calls);
+            move |_request: &wiremock::Request| match calls.fetch_add(1, Ordering::SeqCst) {
+                0 => responses::sse_response(create_goal.clone()),
+                1 => ResponseTemplate::new(503).set_body_json(json!({
+                    "error": {
+                        "code": "server_is_overloaded",
+                        "message": "synthetic transient failure",
+                    }
+                })),
+                2 => responses::sse_response(complete_goal.clone())
+                    .set_delay(Duration::from_secs(2)),
+                3 => responses::sse_response(done.clone()),
+                call => panic!("unexpected model request {call}"),
+            }
+        })
+        .expect(4)
+        .mount(&server)
+        .await;
+
+    let codex_home = TempDir::new()?;
+    mock_responses_config(&server.uri())
+        .enable_feature(Feature::Goals)
+        .with_provider_config("supports_websockets = false")
+        .write(codex_home.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_managed_config()
+        .build_initialized()
+        .await?;
+
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            model: Some("gpt-5.2-codex".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let TurnStartResponse { turn } = mcp
+        .request(|request_id| codex_app_server_protocol::ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![UserInput::Text {
+                    text: "create a goal and keep working".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            },
+        })
+        .await?;
+
+    let failed: TurnCompletedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_notification("turn/completed"),
+    )
+    .await??;
+    assert_eq!(failed.turn.id, turn.id);
+    assert_eq!(failed.turn.status, TurnStatus::Failed);
+    assert_eq!(
+        failed
+            .turn
+            .error
+            .and_then(|error| error.codex_error_info),
+        Some(CodexErrorInfo::ServerOverloaded)
+    );
+
+    let continued: TurnStartedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_notification("turn/started"),
+    )
+    .await??;
+    assert_eq!(continued.thread_id, thread.id);
+    assert_ne!(continued.turn.id, turn.id);
+
+    let get_id = mcp
+        .send_raw_request(
+            "thread/goal/get",
+            Some(json!({ "threadId": thread.id })),
+        )
+        .await?;
+    let persisted: codex_app_server_protocol::ThreadGoalGetResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(get_id)).await??;
+    assert_eq!(
+        persisted.goal.expect("goal should remain persisted").status,
+        ThreadGoalStatus::Active
+    );
+
+    let completed: TurnCompletedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_notification("turn/completed"),
+    )
+    .await??;
+    assert_eq!(completed.turn.id, continued.turn.id);
+    assert_eq!(completed.turn.status, TurnStatus::Completed);
     Ok(())
 }
 

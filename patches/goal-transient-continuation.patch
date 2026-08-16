@@ -1,5 +1,5 @@
 diff --git a/codex-rs/ext/goal/src/extension.rs b/codex-rs/ext/goal/src/extension.rs
-index fc6526d8317c75155bade49332d1289d75de6261..5efdda708ed194767a8de96686f02baae8db5738 100644
+index fc6526d8317c75155bade49332d1289d75de6261..b6954dee11f4562912e93694c2f9fc5e1ce8a3e9 100644
 --- a/codex-rs/ext/goal/src/extension.rs
 +++ b/codex-rs/ext/goal/src/extension.rs
 @@ -38,6 +38,7 @@ use crate::analytics::GoalAnalytics;
@@ -23,7 +23,7 @@ index fc6526d8317c75155bade49332d1289d75de6261..5efdda708ed194767a8de96686f02baa
          })
      }
  
-@@ -298,38 +300,115 @@ where
+@@ -298,38 +300,57 @@ where
                  tracing::warn!(
                      "failed to account active goal progress after turn abort for {turn_id}: {err}"
                  );
@@ -89,6 +89,14 @@ index fc6526d8317c75155bade49332d1289d75de6261..5efdda708ed194767a8de96686f02baa
 +    }
 +}
 +
+ impl<C> TokenUsageContributor for GoalExtension<C>
+ where
+     C: Send + Sync + 'static,
+@@ -500,3 +521,61 @@ fn tool_attempt_counts_for_goal_progress(outcome: ToolCallOutcome) -> bool {
+         | ToolCallOutcome::Aborted => false,
+     }
+ }
++
 +#[cfg(test)]
 +mod transient_error_tests {
 +    use super::is_transient_goal_error;
@@ -146,10 +154,6 @@ index fc6526d8317c75155bade49332d1289d75de6261..5efdda708ed194767a8de96686f02baa
 +        assert!(!is_transient_goal_error(&CodexErrorInfo::Other));
 +    }
 +}
-+
- impl<C> TokenUsageContributor for GoalExtension<C>
- where
-     C: Send + Sync + 'static,
 diff --git a/codex-rs/ext/goal/src/runtime.rs b/codex-rs/ext/goal/src/runtime.rs
 index 31b8b2eb8ed298b1862f3583370ba76c19680e3e..9d62f282b79c9886e9b4ce08bc3eb44dd53ed71f 100644
 --- a/codex-rs/ext/goal/src/runtime.rs

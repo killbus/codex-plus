@@ -351,64 +351,6 @@ fn is_transient_goal_error(error: &CodexErrorInfo) -> bool {
     }
 }
 
-#[cfg(test)]
-mod transient_error_tests {
-    use super::is_transient_goal_error;
-    use codex_protocol::protocol::CodexErrorInfo;
-    use codex_protocol::protocol::NonSteerableTurnKind;
-
-    #[test]
-    fn allows_only_explicit_transient_error_matrix() {
-        assert!(is_transient_goal_error(&CodexErrorInfo::ServerOverloaded));
-
-        macro_rules! assert_status_matrix {
-            ($variant:ident) => {
-                for status in [None, Some(429), Some(500), Some(503)] {
-                    assert!(is_transient_goal_error(&CodexErrorInfo::$variant {
-                        http_status_code: status,
-                    }));
-                }
-                for status in [Some(400), Some(401), Some(499)] {
-                    assert!(!is_transient_goal_error(&CodexErrorInfo::$variant {
-                        http_status_code: status,
-                    }));
-                }
-            };
-        }
-
-        assert_status_matrix!(HttpConnectionFailed);
-        assert_status_matrix!(ResponseStreamConnectionFailed);
-        assert_status_matrix!(ResponseStreamDisconnected);
-        assert_status_matrix!(ResponseTooManyFailedAttempts);
-
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::InternalServerError
-        ));
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::ContextWindowExceeded
-        ));
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::UsageLimitExceeded
-        ));
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::SessionBudgetExceeded
-        ));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::CyberPolicy));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::Unauthorized));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::BadRequest));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::SandboxError));
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::ActiveTurnNotSteerable {
-                turn_kind: NonSteerableTurnKind::Compact,
-            }
-        ));
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::ThreadRollbackFailed
-        ));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::Other));
-    }
-}
-
 impl<C> TokenUsageContributor for GoalExtension<C>
 where
     C: Send + Sync + 'static,
@@ -577,5 +519,63 @@ fn tool_attempt_counts_for_goal_progress(outcome: ToolCallOutcome) -> bool {
             handler_executed: false,
         }
         | ToolCallOutcome::Aborted => false,
+    }
+}
+
+#[cfg(test)]
+mod transient_error_tests {
+    use super::is_transient_goal_error;
+    use codex_protocol::protocol::CodexErrorInfo;
+    use codex_protocol::protocol::NonSteerableTurnKind;
+
+    #[test]
+    fn allows_only_explicit_transient_error_matrix() {
+        assert!(is_transient_goal_error(&CodexErrorInfo::ServerOverloaded));
+
+        macro_rules! assert_status_matrix {
+            ($variant:ident) => {
+                for status in [None, Some(429), Some(500), Some(503)] {
+                    assert!(is_transient_goal_error(&CodexErrorInfo::$variant {
+                        http_status_code: status,
+                    }));
+                }
+                for status in [Some(400), Some(401), Some(499)] {
+                    assert!(!is_transient_goal_error(&CodexErrorInfo::$variant {
+                        http_status_code: status,
+                    }));
+                }
+            };
+        }
+
+        assert_status_matrix!(HttpConnectionFailed);
+        assert_status_matrix!(ResponseStreamConnectionFailed);
+        assert_status_matrix!(ResponseStreamDisconnected);
+        assert_status_matrix!(ResponseTooManyFailedAttempts);
+
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::InternalServerError
+        ));
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::ContextWindowExceeded
+        ));
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::UsageLimitExceeded
+        ));
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::SessionBudgetExceeded
+        ));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::CyberPolicy));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::Unauthorized));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::BadRequest));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::SandboxError));
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::ActiveTurnNotSteerable {
+                turn_kind: NonSteerableTurnKind::Compact,
+            }
+        ));
+        assert!(!is_transient_goal_error(
+            &CodexErrorInfo::ThreadRollbackFailed
+        ));
+        assert!(!is_transient_goal_error(&CodexErrorInfo::Other));
     }
 }

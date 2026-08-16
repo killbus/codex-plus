@@ -1936,8 +1936,25 @@ async fn transient_goal_turn_error_starts_next_automatic_turn() -> Result<()> {
         Some(CodexErrorInfo::ServerOverloaded)
     );
 
+    let continued_notification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_matching_notification(
+            "next automatic turn/started",
+            |notification| {
+                notification.method == "turn/started"
+                    && notification
+                        .params
+                        .as_ref()
+                        .and_then(|params| params.get("turn"))
+                        .and_then(|turn| turn.get("id"))
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|turn_id| turn_id != turn.id)
+            },
+        ),
+    )
+    .await??;
     let continued: TurnStartedNotification =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_notification("turn/started")).await??;
+        serde_json::from_value(continued_notification.params.expect("turn/started params"))?;
     assert_eq!(continued.thread_id, thread.id);
     assert_ne!(continued.turn.id, turn.id);
 

@@ -7,9 +7,9 @@ materialization differences instead of excluding arbitrary files.
 
 The goal-only tree keeps the source behavior (“only UsageLimitExceeded pauses”) so
 the inherited contract remains independently testable. The integrated tree applies
-`goal-transient-continuation.patch` after the old patch; it restores native blocking
-for permanent and unattributed internal errors while preserving continuation only
-for the explicit transient matrix.
+`shadow-mind.patch` directly after the old patch and does not override Goal error
+handling. Patch-file inspection and a direct apply check prove the two patches have
+no Goal-file conflict.
 
 The verifier never mutates the source repository and uses temporary worktrees for
 all patch applications. Removing the copied tree and patch is a complete rollback.

@@ -1,1 +1,3 @@
 {"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "仓库骨架/决策记录复用已收敛结论，不重写"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "保持 inherited Goal patch 原样并验证 Shadow 集成"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "验证 stream disconnect 到 Goal idle continuation 的完整路径"}

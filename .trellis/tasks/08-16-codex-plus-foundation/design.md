@@ -5,8 +5,7 @@
 ```text
 official commit bb6a127 (pristine)
   -> goal-old-continuation.patch (goal-only compatibility baseline)
-  -> goal-transient-continuation.patch (integrated error matrix)
-  -> shadow-mind.patch (integrated extension)
+  -> shadow-mind.patch (integrated extension; Goal behavior unchanged)
 ```
 
 The repository stores the integrated `codex-src/`. A small provenance script
@@ -34,19 +33,33 @@ discarded before enqueue. This is stronger than checking the id before calling
 
 ## Goal error boundary
 
-The inherited patch remains auditable as a compatibility baseline. The integrated
-patch matches concrete `CodexErrorInfo` variants and HTTP status values. Unknown,
-unattributed `InternalServerError`, or permanent errors use native goal stop
-behavior; only the matrix in the parent PRD keeps the goal active. A bounded
-consecutive-transient counter prevents an unbounded cross-turn loop. Tests use
-concrete variants rather than `Other`.
+The inherited patch is both the auditable compatibility baseline and the final Goal
+policy. Its `on_turn_error` handler returns for every error except
+`UsageLimitExceeded`, leaving the Goal Active for the idle lifecycle to continue.
+The integrated tree does not add a second classifier, protocol mapping dependency,
+or consecutive-failure counter.
+
+`shadow-mind.patch` has no Goal-file hunks and applies directly to the goal-only
+tree. Its app-server integration coverage owns the cross-feature proof that a real
+post-handshake stream disconnect still reaches idle Goal continuation while Shadow
+is installed. The byte-exact inherited Goal patch remains unchanged.
 
 ## Release boundary
 
-The release child runs the fixed Windows x64 toolchain, tests Goal and shadow,
-builds `codex-cli`, copies the root and source license/notice bundle plus a
-non-official trademark statement, writes BUILD-INFO with source/patch/toolchain
-hashes, computes SHA-256, and validates an exact output allowlist.
+The release child runs the fixed `1.95.0` toolchain on native Windows x64/ARM64,
+macOS x64/ARM64, and Linux musl x64/ARM64 runners. Each job tests Goal and shadow,
+checks app-server, builds `codex-cli`, copies the root license/notice bundle plus
+the non-official trademark statement, writes BUILD-INFO with source/patch/toolchain
+hashes, computes SHA-256, and validates an exact output allowlist. A final audit job
+downloads all six artifacts and rechecks platform completeness, ZIP/binary hashes,
+archive paths, and BUILD-INFO provenance before the workflow can succeed.
+Raw-byte provenance is fixed to LF and derives upstream symlinks from Git objects;
+only the rebuilt side is canonicalized so the source's flattened-license difference
+remains auditable. Musl rows use the source-proven release profile while retaining
+full Goal/Shadow package tests and app-server integration checking. They also
+follow the source workflow's checksum-verified official Codex `rusty_v8` override
+and retry transient network failures at the client boundary. Manifest digests sort
+normalized string paths so Windows and POSIX hosts produce the same tree hashes.
 
 ## Rollback
 

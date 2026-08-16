@@ -8,8 +8,8 @@ import hashlib
 import json
 import subprocess
 import tempfile
+import time
 from pathlib import Path
-
 
 UPSTREAM = "https://github.com/openai/codex.git"
 COMMIT = "bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb"
@@ -22,6 +22,9 @@ EXPECTED_MATERIALIZATION_DIFFERENCES = frozenset(
         "codex-rs/vendor/bubblewrap/LICENSE",
     }
 )
+EXPECTED_SYMLINK_MATERIALIZATIONS = {
+    "codex-rs/vendor/bubblewrap/LICENSE": "COPYING",
+}
 
 
 def run(*args: str, cwd: Path | None = None) -> str:
@@ -43,14 +46,94 @@ def display_path(path: Path) -> str:
         return path.name
 
 
-def manifest(root: Path) -> dict[str, str]:
+def git_symlink_targets(root: Path, treeish: str = "HEAD") -> dict[str, str]:
+    """Return symlink paths and targets from a Git tree, independent of checkout mode."""
+    output = subprocess.check_output(
+        ("git", "-C", str(root), "ls-tree", "-r", "-z", treeish)
+    )
+    result: dict[str, str] = {}
+    for record in output.split(b"\0"):
+        if not record:
+            continue
+        metadata, path_bytes = record.split(b"\t", 1)
+        mode, _kind, object_id = metadata.split(b" ", 2)
+        if mode != b"120000":
+            continue
+        target = subprocess.check_output(
+            ("git", "-C", str(root), "cat-file", "blob", object_id)
+        )
+        result[path_bytes.decode("utf-8")] = target.decode("utf-8")
+    return result
+
+
+def manifest(root: Path, symlink_targets: dict[str, str] | None = None) -> dict[str, str]:
+    symlink_targets = symlink_targets or {}
     result: dict[str, str] = {}
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or ".git" in path.parts or "target" in path.parts:
+        if ".git" in path.parts or "target" in path.parts:
             continue
         rel = path.relative_to(root).as_posix()
-        result[rel] = digest(path)
+        symlink_target = symlink_targets.get(rel)
+        if symlink_target is not None:
+            # Windows checks out Git symlinks as regular files containing the
+            # link target. Hash the resolved target on every OS so the manifest
+            # describes the same content regardless of checkout capability.
+            resolved = (path.parent / symlink_target).resolve()
+            try:
+                resolved.relative_to(root.resolve())
+            except ValueError as error:
+                raise SystemExit(f"symlink target escapes source root: {rel}") from error
+            if not resolved.is_file():
+                raise SystemExit(f"symlink target is not a file: {rel} -> {symlink_target}")
+            result[rel] = digest(resolved)
+        elif path.is_file() and not path.is_symlink():
+            result[rel] = digest(path)
     return result
+
+
+def checkout_upstream(work: Path, upstream: str, commit: str) -> None:
+    run("git", "init", "--quiet", str(work))
+    # The rebuilt tree is a byte-level provenance input. Do not inherit the
+    # Windows runner's checkout conversion policy.
+    run("git", "-C", str(work), "config", "core.autocrlf", "false")
+    run("git", "-C", str(work), "remote", "add", "origin", upstream)
+    fetch_upstream_commit(work, commit)
+    run("git", "-C", str(work), "checkout", "--quiet", "--detach", commit)
+
+
+def stale_output_detail(recorded: str, result: dict[str, object]) -> str:
+    try:
+        recorded_result = json.loads(recorded)
+    except json.JSONDecodeError:
+        return "recorded output is not valid JSON"
+    differing_fields = sorted(
+        key
+        for key in set(recorded_result) | set(result)
+        if recorded_result.get(key) != result.get(key)
+    )
+    return "differing fields: " + ", ".join(differing_fields)
+
+
+def fetch_upstream_commit(work: Path, commit: str, attempts: int = 3) -> None:
+    """Retry only the network fetch, never deterministic manifest failures."""
+    for attempt in range(1, attempts + 1):
+        try:
+            run(
+                "git",
+                "-C",
+                str(work),
+                "fetch",
+                "--quiet",
+                "--filter=blob:none",
+                "--no-tags",
+                "origin",
+                commit,
+            )
+            return
+        except subprocess.CalledProcessError:
+            if attempt == attempts:
+                raise
+            time.sleep(attempt * 10)
 
 
 def main() -> int:
@@ -74,30 +157,27 @@ def main() -> int:
         if args.upstream_root:
             upstream_root = args.upstream_root.resolve()
             run("git", "-C", str(upstream_root), "cat-file", "-e", f"{args.commit}^{{commit}}")
+            symlink_targets = git_symlink_targets(upstream_root, args.commit)
             run("git", "-C", str(upstream_root), "archive", args.commit, "-o", str(Path(temp) / "upstream.tar"))
             work.mkdir()
             run("tar", "-xf", str(Path(temp) / "upstream.tar"), "-C", str(work))
         else:
-            run("git", "init", "--quiet", str(work))
-            run("git", "-C", str(work), "remote", "add", "origin", args.upstream)
-            run(
-                "git",
-                "-C",
-                str(work),
-                "fetch",
-                "--quiet",
-                "--filter=blob:none",
-                "--no-tags",
-                "origin",
-                args.commit,
-            )
-            run("git", "-C", str(work), "checkout", "--quiet", "--detach", args.commit)
+            checkout_upstream(work, args.upstream, args.commit)
+            symlink_targets = git_symlink_targets(work)
         for patch in patches:
             run("git", "apply", "--check", str(patch), cwd=work)
             run("git", "apply", str(patch), cwd=work)
 
+        if symlink_targets != EXPECTED_SYMLINK_MATERIALIZATIONS:
+            raise SystemExit(
+                "provenance verification failed: upstream symlink contract changed: "
+                + json.dumps(symlink_targets, sort_keys=True)
+            )
+        # The copied source intentionally preserves its flattened Windows
+        # materialization. Only the rebuilt Git tree is normalized so that its
+        # native/placeholder checkout modes produce one stable comparison.
         source_manifest = manifest(source_root)
-        rebuilt_manifest = manifest(work)
+        rebuilt_manifest = manifest(work, symlink_targets)
         changed = {
             key: {"source": source_manifest.get(key), "rebuilt": rebuilt_manifest.get(key)}
             for key in sorted(set(source_manifest) | set(rebuilt_manifest))
@@ -122,13 +202,22 @@ def main() -> int:
             "rebuilt_tree_sha256": digest_manifest(rebuilt_manifest),
             "changed_files": changed,
             "expected_materialization_differences": sorted(EXPECTED_MATERIALIZATION_DIFFERENCES),
-            "note": "Differences are reported explicitly; no vendored-only comparison is used.",
+            "normalized_git_symlinks": dict(sorted(symlink_targets.items())),
+            "note": (
+                "Content differences are reported explicitly; rebuilt Git symlinks are hashed "
+                "through their targets across checkout modes, while copied source bytes remain "
+                "literal materialization evidence."
+            ),
         }
 
     serialized = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.check:
-        if not args.output.is_file() or args.output.read_text(encoding="utf-8") != serialized:
-            raise SystemExit(f"provenance output is stale: {args.output}")
+        if not args.output.is_file():
+            raise SystemExit(f"provenance output is missing: {args.output}")
+        recorded = args.output.read_text(encoding="utf-8")
+        if recorded != serialized:
+            detail = stale_output_detail(recorded, result)
+            raise SystemExit(f"provenance output is stale: {args.output} ({detail})")
     else:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(serialized, encoding="utf-8")
@@ -138,7 +227,10 @@ def main() -> int:
 
 def digest_manifest(values: dict[str, str]) -> str:
     h = hashlib.sha256()
-    for key, value in values.items():
+    # pathlib orders Windows paths case-insensitively, while POSIX path order is
+    # case-sensitive. Sort the normalized manifest keys here so the tree digest
+    # never inherits the host's Path flavour or directory iteration order.
+    for key, value in sorted(values.items()):
         h.update(key.encode())
         h.update(b"\0")
         h.update(value.encode())

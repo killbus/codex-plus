@@ -7,4 +7,10 @@
 # picking either side (task state lives in task.json, not index.md). See
 # .trellis/spec/cli/backend/directory-structure.md for details.
 .trellis/workspace/*/journal-*.md merge=union
-*.patch whitespace=-trailing-space
+
+# Provenance compares raw bytes. Keep the copied snapshot, its patch chain, and
+# the recorded manifest byte-identical on Windows instead of allowing the
+# runner's core.autocrlf setting to rewrite them during checkout.
+/codex-src/** text=auto eol=lf
+/patches/** text eol=lf whitespace=-trailing-space
+/docs/provenance.json text eol=lf

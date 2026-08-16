@@ -1,2 +1,3 @@
 {"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "继承基线应原样复用来源仓库，不重写不漂移"}
 {"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "基线验证（回归测试/构建）按项目质量标准执行"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "验证真实 stream error 经 turn lifecycle 到 Goal idle continuation"}

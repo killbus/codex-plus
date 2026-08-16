@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 
 use codex_core::ThreadManager;
@@ -33,7 +32,6 @@ pub(crate) struct GoalRuntimeConfig {
 }
 
 pub(crate) enum ActiveGoalStopReason {
-    TurnError,
     UsageLimit,
 }
 
@@ -48,8 +46,6 @@ struct GoalRuntimeInner {
     enabled: AtomicBool,
     tools_available_for_thread: bool,
     goal_state_lock: Semaphore,
-    transient_failures: AtomicU32,
-    turn_had_error: AtomicBool,
 }
 
 pub(crate) struct AccountedGoalProgress {
@@ -102,8 +98,6 @@ impl GoalRuntimeHandle {
                 enabled: AtomicBool::new(config.enabled),
                 tools_available_for_thread: config.tools_available_for_thread,
                 goal_state_lock: Semaphore::new(/*permits*/ 1),
-                transient_failures: AtomicU32::new(0),
-                turn_had_error: AtomicBool::new(false),
             }),
         }
     }
@@ -118,32 +112,6 @@ impl GoalRuntimeHandle {
 
     pub(crate) fn tools_visible(&self) -> bool {
         self.is_enabled() && self.inner.tools_available_for_thread
-    }
-
-    /// Keep automatic continuation bounded across repeated transient failures.
-    pub(crate) fn allow_transient_continuation(&self) -> bool {
-        const MAX_CONSECUTIVE_TRANSIENT_FAILURES: u32 = 3;
-        self.inner
-            .transient_failures
-            .fetch_add(1, Ordering::Relaxed)
-            < MAX_CONSECUTIVE_TRANSIENT_FAILURES
-    }
-
-    pub(crate) fn mark_turn_error(&self) {
-        self.inner.turn_had_error.store(true, Ordering::Release);
-    }
-
-    /// A clean turn breaks the consecutive transient-failure sequence.
-    pub(crate) fn finish_turn(&self) {
-        if !self.inner.turn_had_error.swap(false, Ordering::AcqRel) {
-            self.inner.transient_failures.store(0, Ordering::Release);
-        }
-    }
-
-    pub(crate) fn reset_after_aborted_turn(&self) {
-        // An abort is a lifecycle boundary, not a transient failure.
-        self.inner.turn_had_error.store(false, Ordering::Release);
-        self.inner.transient_failures.store(0, Ordering::Release);
     }
 
     pub(crate) fn thread_id(&self) -> ThreadId {
@@ -293,9 +261,6 @@ impl GoalRuntimeHandle {
         }
 
         let (event_name, status) = match reason {
-            ActiveGoalStopReason::TurnError => {
-                ("turn-error", codex_state::ThreadGoalStatus::Blocked)
-            }
             ActiveGoalStopReason::UsageLimit => {
                 ("usage-limit", codex_state::ThreadGoalStatus::UsageLimited)
             }

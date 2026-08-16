@@ -2,7 +2,7 @@
   "id": "cli-release",
   "name": "cli-release",
   "title": "CLI release pipeline",
-  "description": "Build and publish a Windows x64 CLI-only archive with license, provenance, and checksum verification",
+  "description": "Build and publish six native CLI-only archives with license, provenance, and checksum verification",
   "status": "planning",
   "dev_type": null,
   "scope": null,

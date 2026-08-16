@@ -1,1 +1,3 @@
 {"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "check 核对骨架 README/补丁/决策记录是否与 PRD 一致"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查两段 patch 链、测试和 CI 门禁"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查真实断流自动续跑与 Shadow 共存"}

@@ -29,18 +29,19 @@
     "codex-rs/Cargo.lock",
     "codex-rs/vendor/bubblewrap/LICENSE"
   ],
-  "note": "Differences are reported explicitly; no vendored-only comparison is used.",
+  "normalized_git_symlinks": {
+    "codex-rs/vendor/bubblewrap/LICENSE": "COPYING"
+  },
+  "note": "Content differences are reported explicitly; rebuilt Git symlinks are hashed through their targets across checkout modes, while copied source bytes remain literal materialization evidence.",
   "patch_sha256": [
     "eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6",
-    "cda9fe9896a59aeebb5a3e5ed7bd8bcd8efab398e89cc03909d7aba105c09d8a",
-    "7003418be2f7757067b51dfb872f200178ab40759ccb51bf147fdb95a44e451d"
+    "52bf7d412247fcf830d96e3649d7e9e7283cbe8426f0fde2a77adda36a39cea1"
   ],
   "patches": [
     "patches/goal-old-continuation.patch",
-    "patches/goal-transient-continuation.patch",
     "patches/shadow-mind.patch"
   ],
-  "rebuilt_tree_sha256": "6c2a09bf10fa35fab972128f7a09108e927b97d6ad5fd251bd00c9674b10fb63",
-  "source_tree_sha256": "cad3d31243447bc8cc8773a69d49c78440a4a178c6c22b93623a8363fb002d66",
+  "rebuilt_tree_sha256": "bbb632cd9a25177b8713ee0bcab4a5e6379d9b6b70097b291e4dc61879f569e5",
+  "source_tree_sha256": "474444a231591ecb2916f13f70142cffd907b5af78aabc6c1102933e77e7ee9e",
   "upstream": "https://github.com/openai/codex.git"
 }

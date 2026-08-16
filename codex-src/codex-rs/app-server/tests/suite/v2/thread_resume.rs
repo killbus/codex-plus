@@ -19,7 +19,6 @@ use chrono::Utc;
 use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientInfo;
-use codex_app_server_protocol::CodexErrorInfo;
 use codex_app_server_protocol::CommandExecutionApprovalDecision;
 use codex_app_server_protocol::CommandExecutionRequestApprovalResponse;
 use codex_app_server_protocol::FileChangeApprovalDecision;
@@ -104,6 +103,8 @@ use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_remote;
 use core_test_support::skip_if_wine_exec;
+use core_test_support::streaming_sse::StreamingSseChunk;
+use core_test_support::streaming_sse::start_streaming_sse_server;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::fs::FileTimes;
@@ -111,9 +112,6 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -1846,9 +1844,7 @@ async fn thread_goal_set_edits_objective_without_resetting_usage() -> Result<()>
 }
 
 #[tokio::test]
-async fn transient_goal_turn_error_starts_next_automatic_turn() -> Result<()> {
-    let server = MockServer::start().await;
-    let calls = Arc::new(AtomicUsize::new(0));
+async fn dropped_stream_goal_turn_error_starts_next_automatic_turn_with_shadow() -> Result<()> {
     let create_goal = responses::sse(vec![
         responses::ev_response_created("create-goal"),
         responses::ev_function_call(
@@ -1868,32 +1864,22 @@ async fn transient_goal_turn_error_starts_next_automatic_turn() -> Result<()> {
         responses::ev_completed("complete-goal"),
     ]);
     let done = create_final_assistant_message_sse_response("Done")?;
-    Mock::given(method("POST"))
-        .and(path("/v1/responses"))
-        .respond_with({
-            let calls = Arc::clone(&calls);
-            move |_request: &wiremock::Request| match calls.fetch_add(1, Ordering::SeqCst) {
-                0 => responses::sse_response(create_goal.clone()),
-                1 => ResponseTemplate::new(503).set_body_json(json!({
-                    "error": {
-                        "code": "server_is_overloaded",
-                        "message": "synthetic transient failure",
-                    }
-                })),
-                2 => {
-                    responses::sse_response(complete_goal.clone()).set_delay(Duration::from_secs(2))
-                }
-                3 => responses::sse_response(done.clone()),
-                call => panic!("unexpected model request {call}"),
-            }
-        })
-        .expect(4)
-        .mount(&server)
-        .await;
+    let dropped_after_handshake = responses::sse(vec![responses::ev_response_created(
+        "dropped-after-handshake",
+    )]);
+    let stream = |body| vec![StreamingSseChunk { gate: None, body }];
+    let (server, _) = start_streaming_sse_server(vec![
+        stream(create_goal),
+        stream(dropped_after_handshake),
+        stream(complete_goal),
+        stream(done),
+    ])
+    .await;
 
     let codex_home = TempDir::new()?;
-    mock_responses_config(&server.uri())
+    mock_responses_config(server.uri())
         .enable_feature(Feature::Goals)
+        .enable_feature(Feature::Shadow)
         .with_provider_config("supports_websockets = false")
         .write(codex_home.path())?;
     let mut mcp = TestAppServer::builder()
@@ -1931,10 +1917,7 @@ async fn transient_goal_turn_error_starts_next_automatic_turn() -> Result<()> {
     .await??;
     assert_eq!(failed.turn.id, turn.id);
     assert_eq!(failed.turn.status, TurnStatus::Failed);
-    assert_eq!(
-        failed.turn.error.and_then(|error| error.codex_error_info),
-        Some(CodexErrorInfo::ServerOverloaded)
-    );
+    assert!(failed.turn.error.is_some());
 
     let continued_notification = timeout(
         DEFAULT_READ_TIMEOUT,
@@ -1975,6 +1958,8 @@ async fn transient_goal_turn_error_starts_next_automatic_turn() -> Result<()> {
     .await??;
     assert_eq!(completed.turn.id, continued.turn.id);
     assert_eq!(completed.turn.status, TurnStatus::Completed);
+    assert_eq!(server.requests().await.len(), 4);
+    server.shutdown().await;
     Ok(())
 }
 

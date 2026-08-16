@@ -41,7 +41,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Verify provenance and patch chain
-        run: python scripts/verify_provenance.py --check --patch patches/goal-old-continuation.patch --patch patches/goal-transient-continuation.patch --patch patches/shadow-mind.patch
+        run: python scripts/verify_provenance.py --check --patch patches/goal-old-continuation.patch --patch patches/shadow-mind.patch
 
       - name: Test goal-only compatibility baseline
         run: |
@@ -74,9 +74,9 @@ jobs:
         working-directory: codex-src/codex-rs
         run: cargo test --locked -p codex-goal-extension
 
-      - name: Test transient Goal lifecycle
+      - name: Test dropped-stream Goal lifecycle with Shadow
         working-directory: codex-src/codex-rs
-        run: cargo test --locked -p codex-app-server --test all suite::v2::thread_resume::transient_goal_turn_error_starts_next_automatic_turn -- --exact
+        run: cargo test --locked -p codex-app-server --test all suite::v2::thread_resume::dropped_stream_goal_turn_error_starts_next_automatic_turn_with_shadow -- --exact
 
       - name: Test changed TUI integration
         working-directory: codex-src/codex-rs

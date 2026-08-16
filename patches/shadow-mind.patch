@@ -72,18 +72,10 @@ index 10fa319f62fc3aba05d019586f593b06f91cd595..3dd82cf00af7daab193737d9eb9efa0e
            options: StartThreadOptions|
            -> AgentSpawnFuture<'static, NewThread, CodexErr> {
 diff --git a/codex-rs/app-server/tests/suite/v2/thread_resume.rs b/codex-rs/app-server/tests/suite/v2/thread_resume.rs
-index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..33f4ea35febfa8ed1c84b9e813eabbaadd7fcccc 100644
+index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..f8773afec1ef0290baded09ba059f415a5366736 100644
 --- a/codex-rs/app-server/tests/suite/v2/thread_resume.rs
 +++ b/codex-rs/app-server/tests/suite/v2/thread_resume.rs
-@@ -19,6 +19,7 @@ use chrono::Utc;
- use codex_app_server_protocol::ApprovalsReviewer;
- use codex_app_server_protocol::AskForApproval;
- use codex_app_server_protocol::ClientInfo;
-+use codex_app_server_protocol::CodexErrorInfo;
- use codex_app_server_protocol::CommandExecutionApprovalDecision;
- use codex_app_server_protocol::CommandExecutionRequestApprovalResponse;
- use codex_app_server_protocol::FileChangeApprovalDecision;
-@@ -56,9 +57,11 @@ use codex_app_server_protocol::ThreadStartParams;
+@@ -56,9 +56,11 @@ use codex_app_server_protocol::ThreadStartParams;
  use codex_app_server_protocol::ThreadStartResponse;
  use codex_app_server_protocol::ThreadStatus;
  use codex_app_server_protocol::ThreadUnsubscribeParams;
@@ -95,24 +87,21 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..33f4ea35febfa8ed1c84b9e813eabbaa
  use codex_app_server_protocol::TurnStatus;
  use codex_app_server_protocol::UserInput;
  use codex_config::types::AuthCredentialsStoreMode;
-@@ -108,6 +111,9 @@ use std::io::Write;
- use std::path::Path;
- use std::path::PathBuf;
- use std::process::Command;
-+use std::sync::Arc;
-+use std::sync::atomic::AtomicUsize;
-+use std::sync::atomic::Ordering;
- use std::time::Duration;
- use tempfile::TempDir;
- use tokio::time::timeout;
-@@ -1839,6 +1845,139 @@ async fn thread_goal_set_edits_objective_without_resetting_usage() -> Result<()>
+@@ -101,6 +103,8 @@ use core_test_support::responses;
+ use core_test_support::skip_if_no_network;
+ use core_test_support::skip_if_remote;
+ use core_test_support::skip_if_wine_exec;
++use core_test_support::streaming_sse::StreamingSseChunk;
++use core_test_support::streaming_sse::start_streaming_sse_server;
+ use pretty_assertions::assert_eq;
+ use serde_json::json;
+ use std::fs::FileTimes;
+@@ -1839,6 +1843,126 @@ async fn thread_goal_set_edits_objective_without_resetting_usage() -> Result<()>
      Ok(())
  }
  
 +#[tokio::test]
-+async fn transient_goal_turn_error_starts_next_automatic_turn() -> Result<()> {
-+    let server = MockServer::start().await;
-+    let calls = Arc::new(AtomicUsize::new(0));
++async fn dropped_stream_goal_turn_error_starts_next_automatic_turn_with_shadow() -> Result<()> {
 +    let create_goal = responses::sse(vec![
 +        responses::ev_response_created("create-goal"),
 +        responses::ev_function_call(
@@ -132,32 +121,22 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..33f4ea35febfa8ed1c84b9e813eabbaa
 +        responses::ev_completed("complete-goal"),
 +    ]);
 +    let done = create_final_assistant_message_sse_response("Done")?;
-+    Mock::given(method("POST"))
-+        .and(path("/v1/responses"))
-+        .respond_with({
-+            let calls = Arc::clone(&calls);
-+            move |_request: &wiremock::Request| match calls.fetch_add(1, Ordering::SeqCst) {
-+                0 => responses::sse_response(create_goal.clone()),
-+                1 => ResponseTemplate::new(503).set_body_json(json!({
-+                    "error": {
-+                        "code": "server_is_overloaded",
-+                        "message": "synthetic transient failure",
-+                    }
-+                })),
-+                2 => {
-+                    responses::sse_response(complete_goal.clone()).set_delay(Duration::from_secs(2))
-+                }
-+                3 => responses::sse_response(done.clone()),
-+                call => panic!("unexpected model request {call}"),
-+            }
-+        })
-+        .expect(4)
-+        .mount(&server)
-+        .await;
++    let dropped_after_handshake = responses::sse(vec![responses::ev_response_created(
++        "dropped-after-handshake",
++    )]);
++    let stream = |body| vec![StreamingSseChunk { gate: None, body }];
++    let (server, _) = start_streaming_sse_server(vec![
++        stream(create_goal),
++        stream(dropped_after_handshake),
++        stream(complete_goal),
++        stream(done),
++    ])
++    .await;
 +
 +    let codex_home = TempDir::new()?;
-+    mock_responses_config(&server.uri())
++    mock_responses_config(server.uri())
 +        .enable_feature(Feature::Goals)
++        .enable_feature(Feature::Shadow)
 +        .with_provider_config("supports_websockets = false")
 +        .write(codex_home.path())?;
 +    let mut mcp = TestAppServer::builder()
@@ -195,10 +174,7 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..33f4ea35febfa8ed1c84b9e813eabbaa
 +    .await??;
 +    assert_eq!(failed.turn.id, turn.id);
 +    assert_eq!(failed.turn.status, TurnStatus::Failed);
-+    assert_eq!(
-+        failed.turn.error.and_then(|error| error.codex_error_info),
-+        Some(CodexErrorInfo::ServerOverloaded)
-+    );
++    assert!(failed.turn.error.is_some());
 +
 +    let continued_notification = timeout(
 +        DEFAULT_READ_TIMEOUT,
@@ -239,6 +215,8 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..33f4ea35febfa8ed1c84b9e813eabbaa
 +    .await??;
 +    assert_eq!(completed.turn.id, continued.turn.id);
 +    assert_eq!(completed.turn.status, TurnStatus::Completed);
++    assert_eq!(server.requests().await.len(), 4);
++    server.shutdown().await;
 +    Ok(())
 +}
 +
@@ -585,6 +563,28 @@ index 3a4b876dc39177371e279e81236de40d68b6c936..f5fda86e3758f4d95dd59c654a47c722
          self.start_thread_inner(options, Some(forked_from_thread_id))
              .await
      }
+diff --git a/codex-rs/ext/goal/src/runtime.rs b/codex-rs/ext/goal/src/runtime.rs
+index 31b8b2eb8ed298b1862f3583370ba76c19680e3e..f66cf33147d10ece11e7f30441e5ad33d470fb1b 100644
+--- a/codex-rs/ext/goal/src/runtime.rs
++++ b/codex-rs/ext/goal/src/runtime.rs
+@@ -32,7 +32,6 @@ pub(crate) struct GoalRuntimeConfig {
+ }
+ 
+ pub(crate) enum ActiveGoalStopReason {
+-    TurnError,
+     UsageLimit,
+ }
+ 
+@@ -262,9 +261,6 @@ impl GoalRuntimeHandle {
+         }
+ 
+         let (event_name, status) = match reason {
+-            ActiveGoalStopReason::TurnError => {
+-                ("turn-error", codex_state::ThreadGoalStatus::Blocked)
+-            }
+             ActiveGoalStopReason::UsageLimit => {
+                 ("usage-limit", codex_state::ThreadGoalStatus::UsageLimited)
+             }
 diff --git a/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs b/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs
 index 4fa6e6721c4f96934537df16883c348fd61dcc18..76c4a9c09ccdd8b66f36fab890460936d3d5e997 100644
 --- a/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs
@@ -1824,6 +1824,18 @@ index 7fd75990ebc2702e991c1edd997b577832f5f504..dc746f81b7ddcc3c89371fb35d3fa4af
  codex-sandboxing = { workspace = true }
  codex-shell-command = { workspace = true }
  codex-state = { workspace = true }
+diff --git a/codex-rs/tui/src/bottom_pane/slash_commands.rs b/codex-rs/tui/src/bottom_pane/slash_commands.rs
+index 6ca1ba93d137e3ca4c47f02dfe7105f678a028d1..656fe63c0c0a189dee3e635a689a59abb6c9f1cd 100644
+--- a/codex-rs/tui/src/bottom_pane/slash_commands.rs
++++ b/codex-rs/tui/src/bottom_pane/slash_commands.rs
+@@ -308,6 +308,7 @@ mod tests {
+                 SlashCommand::Diff,
+                 SlashCommand::Mention,
+                 SlashCommand::Status,
++                SlashCommand::Shadow,
+                 SlashCommand::Usage,
+             ]
+         );
 diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 index e28cfd7043c98dd779394af82b3692bc89118ae6..420d43975792242f477c6ba7f0bce0f4873f28e3 100644
 --- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
@@ -2055,15 +2067,3 @@ index abd1386932e1e6fe355135bfd13537f89753a629..d577e92f843e54de5987fda4cd5029f7
          assert!(SlashCommand::Ide.available_during_task());
          assert!(SlashCommand::Title.available_during_task());
          assert!(SlashCommand::Statusline.available_during_task());
-diff --git a/codex-rs/tui/src/bottom_pane/slash_commands.rs b/codex-rs/tui/src/bottom_pane/slash_commands.rs
-index 6ca1ba9..656fe63 100644
---- a/codex-rs/tui/src/bottom_pane/slash_commands.rs
-+++ b/codex-rs/tui/src/bottom_pane/slash_commands.rs
-@@ -308,6 +308,7 @@ mod tests {
-                 SlashCommand::Diff,
-                 SlashCommand::Mention,
-                 SlashCommand::Status,
-+                SlashCommand::Shadow,
-                 SlashCommand::Usage,
-             ]
-         );

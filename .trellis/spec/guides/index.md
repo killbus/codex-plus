@@ -23,6 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+| [Cross-Platform Thinking Guide](./cross-platform-thinking-guide.md) | Catch host-dependent source and build assumptions | Native runner matrices or byte provenance |
 
 ---
 
@@ -38,6 +39,15 @@ These guides help you **ask the right questions before coding**.
 - [ ] UI / command code starts casting raw payload fields directly
 
 → Read [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md)
+
+### When to Think About Cross-Platform Issues
+
+- [ ] A workflow compares source or archive bytes across operating systems
+- [ ] Git symlinks, executable bits, or line endings enter provenance
+- [ ] Rust/native dependencies build on Windows, macOS, Linux, or musl
+- [ ] A matrix changes build/test profiles by target
+
+→ Read [Cross-Platform Thinking Guide](./cross-platform-thinking-guide.md)
 
 ### When to Think About Code Reuse
 

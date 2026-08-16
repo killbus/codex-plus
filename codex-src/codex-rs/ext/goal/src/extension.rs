@@ -38,7 +38,6 @@ use crate::analytics::GoalAnalytics;
 use crate::api::GoalService;
 use crate::events::GoalEventEmitter;
 use crate::metrics::GoalMetrics;
-use crate::runtime::ActiveGoalStopReason;
 use crate::runtime::GoalRuntimeConfig;
 use crate::runtime::GoalRuntimeHandle;
 use crate::spec::UPDATE_GOAL_TOOL_NAME;
@@ -271,10 +270,9 @@ where
                 tracing::warn!(
                     "failed to account active goal progress at turn stop for {turn_id}: {err}"
                 );
-            } else {
-                runtime.accounting_state().finish_turn(turn_id);
+                return;
             }
-            runtime.finish_turn();
+            runtime.accounting_state().finish_turn(turn_id);
         })
     }
 
@@ -300,54 +298,35 @@ where
                 tracing::warn!(
                     "failed to account active goal progress after turn abort for {turn_id}: {err}"
                 );
-            } else {
-                runtime.accounting_state().finish_turn(turn_id);
+                return;
             }
-            runtime.reset_after_aborted_turn();
+            runtime.accounting_state().finish_turn(turn_id);
         })
     }
 
     fn on_turn_error<'a>(&'a self, input: TurnErrorInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
+            // Preserve the pre-0.138 goal behavior: terminal turn errors other
+            // than usage limits leave the goal active so idle continuation can
+            // start another turn.
+            if input.error != CodexErrorInfo::UsageLimitExceeded {
+                return;
+            }
+
             let Some(runtime) = goal_runtime_handle(input.thread_store) else {
                 return;
             };
 
-            runtime.mark_turn_error();
-            let is_usage_limit = input.error == CodexErrorInfo::UsageLimitExceeded;
-            let is_transient = is_transient_goal_error(&input.error);
-            if is_transient && runtime.allow_transient_continuation() {
-                return;
-            }
-
-            let stop_reason = if is_usage_limit {
-                ActiveGoalStopReason::UsageLimit
-            } else {
-                ActiveGoalStopReason::TurnError
-            };
             if let Err(err) = runtime
-                .stop_active_goal_for_turn(input.turn_id, stop_reason)
+                .usage_limit_active_goal_for_turn(input.turn_id)
                 .await
             {
                 tracing::warn!(
                     error = ?input.error,
-                    "failed to stop active goal after turn error: {err}"
+                    "failed to usage-limit active goal after usage-limit error: {err}"
                 );
             }
         })
-    }
-}
-
-fn is_transient_goal_error(error: &CodexErrorInfo) -> bool {
-    match error {
-        CodexErrorInfo::ServerOverloaded => true,
-        CodexErrorInfo::HttpConnectionFailed { http_status_code }
-        | CodexErrorInfo::ResponseStreamConnectionFailed { http_status_code }
-        | CodexErrorInfo::ResponseStreamDisconnected { http_status_code }
-        | CodexErrorInfo::ResponseTooManyFailedAttempts { http_status_code } => {
-            http_status_code.is_none_or(|status| status == 429 || status >= 500)
-        }
-        _ => false,
     }
 }
 
@@ -519,63 +498,5 @@ fn tool_attempt_counts_for_goal_progress(outcome: ToolCallOutcome) -> bool {
             handler_executed: false,
         }
         | ToolCallOutcome::Aborted => false,
-    }
-}
-
-#[cfg(test)]
-mod transient_error_tests {
-    use super::is_transient_goal_error;
-    use codex_protocol::protocol::CodexErrorInfo;
-    use codex_protocol::protocol::NonSteerableTurnKind;
-
-    #[test]
-    fn allows_only_explicit_transient_error_matrix() {
-        assert!(is_transient_goal_error(&CodexErrorInfo::ServerOverloaded));
-
-        macro_rules! assert_status_matrix {
-            ($variant:ident) => {
-                for status in [None, Some(429), Some(500), Some(503)] {
-                    assert!(is_transient_goal_error(&CodexErrorInfo::$variant {
-                        http_status_code: status,
-                    }));
-                }
-                for status in [Some(400), Some(401), Some(499)] {
-                    assert!(!is_transient_goal_error(&CodexErrorInfo::$variant {
-                        http_status_code: status,
-                    }));
-                }
-            };
-        }
-
-        assert_status_matrix!(HttpConnectionFailed);
-        assert_status_matrix!(ResponseStreamConnectionFailed);
-        assert_status_matrix!(ResponseStreamDisconnected);
-        assert_status_matrix!(ResponseTooManyFailedAttempts);
-
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::InternalServerError
-        ));
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::ContextWindowExceeded
-        ));
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::UsageLimitExceeded
-        ));
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::SessionBudgetExceeded
-        ));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::CyberPolicy));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::Unauthorized));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::BadRequest));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::SandboxError));
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::ActiveTurnNotSteerable {
-                turn_kind: NonSteerableTurnKind::Compact,
-            }
-        ));
-        assert!(!is_transient_goal_error(
-            &CodexErrorInfo::ThreadRollbackFailed
-        ));
-        assert!(!is_transient_goal_error(&CodexErrorInfo::Other));
     }
 }

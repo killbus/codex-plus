@@ -105,7 +105,7 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..33f4ea35febfa8ed1c84b9e813eabbaa
  use std::time::Duration;
  use tempfile::TempDir;
  use tokio::time::timeout;
-@@ -1839,6 +1845,122 @@ async fn thread_goal_set_edits_objective_without_resetting_usage() -> Result<()>
+@@ -1839,6 +1845,139 @@ async fn thread_goal_set_edits_objective_without_resetting_usage() -> Result<()>
      Ok(())
  }
  
@@ -200,8 +200,25 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..33f4ea35febfa8ed1c84b9e813eabbaa
 +        Some(CodexErrorInfo::ServerOverloaded)
 +    );
 +
++    let continued_notification = timeout(
++        DEFAULT_READ_TIMEOUT,
++        mcp.read_stream_until_matching_notification(
++            "next automatic turn/started",
++            |notification| {
++                notification.method == "turn/started"
++                    && notification
++                        .params
++                        .as_ref()
++                        .and_then(|params| params.get("turn"))
++                        .and_then(|turn| turn.get("id"))
++                        .and_then(serde_json::Value::as_str)
++                        .is_some_and(|turn_id| turn_id != turn.id)
++            },
++        ),
++    )
++    .await??;
 +    let continued: TurnStartedNotification =
-+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_notification("turn/started")).await??;
++        serde_json::from_value(continued_notification.params.expect("turn/started params"))?;
 +    assert_eq!(continued.thread_id, thread.id);
 +    assert_ne!(continued.turn.id, turn.id);
 +

@@ -1,6 +1,7 @@
 use crate::state::ActiveTurn;
 use crate::state::MailboxDeliveryPhase;
 use crate::state::TurnState;
+use codex_protocol::items::TurnItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::user_input::UserInput;
@@ -9,12 +10,13 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::watch;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) enum TurnInput {
     UserInput {
         content: Vec<UserInput>,
         client_id: Option<String>,
     },
+    DisplayItem(Box<TurnItem>),
     ResponseItem(ResponseItem),
     InterAgentCommunication(InterAgentCommunication),
 }
@@ -394,13 +396,16 @@ mod tests {
             .enqueue_mailbox_communication(mail_two.clone())
             .await;
 
-        assert_eq!(
-            input_queue.drain_mailbox_input_items().await,
-            vec![
-                TurnInput::InterAgentCommunication(mail_one),
-                TurnInput::InterAgentCommunication(mail_two)
-            ]
-        );
+        let input = input_queue.drain_mailbox_input_items().await;
+        let [
+            TurnInput::InterAgentCommunication(actual_mail_one),
+            TurnInput::InterAgentCommunication(actual_mail_two),
+        ] = input.as_slice()
+        else {
+            panic!("expected two mailbox communications");
+        };
+        assert_eq!(actual_mail_one, &mail_one);
+        assert_eq!(actual_mail_two, &mail_two);
         assert!(!input_queue.has_pending_mailbox_items().await);
     }
 

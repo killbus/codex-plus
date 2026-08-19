@@ -6,7 +6,9 @@ use crate::codex_thread::TryStartTurnIfIdleRejectionReason;
 use crate::state::ActiveTurn;
 use crate::state::TurnState;
 use crate::tasks::RegularTask;
+use codex_extension_api::AutomaticTurnOrigin;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::items::TurnItem;
 use codex_protocol::models::ResponseItem;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -78,8 +80,13 @@ impl Session {
         self: &Arc<Self>,
         input: Vec<ResponseItem>,
     ) -> Result<(), TryStartTurnIfIdleError> {
-        self.try_start_turn_if_idle_inner(/*expected_idle_epoch*/ None, input)
-            .await
+        self.try_start_turn_if_idle_inner(
+            /*expected_idle_epoch*/ None,
+            AutomaticTurnOrigin::Unspecified,
+            Vec::new(),
+            input,
+        )
+        .await
     }
 
     pub(crate) async fn try_start_turn_if_idle_for_epoch(
@@ -87,13 +94,36 @@ impl Session {
         expected_idle_epoch: u64,
         input: Vec<ResponseItem>,
     ) -> Result<(), TryStartTurnIfIdleError> {
-        self.try_start_turn_if_idle_inner(Some(expected_idle_epoch), input)
-            .await
+        self.try_start_turn_if_idle_inner(
+            Some(expected_idle_epoch),
+            AutomaticTurnOrigin::Unspecified,
+            Vec::new(),
+            input,
+        )
+        .await
+    }
+
+    pub(crate) async fn try_start_turn_if_idle_for_epoch_with_origin(
+        self: &Arc<Self>,
+        expected_idle_epoch: u64,
+        automatic_turn_origin: AutomaticTurnOrigin,
+        display_items: Vec<TurnItem>,
+        input: Vec<ResponseItem>,
+    ) -> Result<(), TryStartTurnIfIdleError> {
+        self.try_start_turn_if_idle_inner(
+            Some(expected_idle_epoch),
+            automatic_turn_origin,
+            display_items,
+            input,
+        )
+        .await
     }
 
     async fn try_start_turn_if_idle_inner(
         self: &Arc<Self>,
         expected_idle_epoch: Option<u64>,
+        automatic_turn_origin: AutomaticTurnOrigin,
+        display_items: Vec<TurnItem>,
         input: Vec<ResponseItem>,
     ) -> Result<(), TryStartTurnIfIdleError> {
         if input.is_empty() {
@@ -142,7 +172,10 @@ impl Session {
         }
 
         let turn_context = self
-            .new_default_turn_with_sub_id(uuid::Uuid::new_v4().to_string())
+            .new_default_turn_with_sub_id_and_origin(
+                uuid::Uuid::new_v4().to_string(),
+                automatic_turn_origin,
+            )
             .await;
         if turn_context.mode == ModeKind::Plan {
             self.clear_reserved_idle_turn(&turn_state).await;
@@ -176,11 +209,15 @@ impl Session {
             ));
         }
 
+        let mut pending_input = Vec::with_capacity(display_items.len() + input.len());
+        pending_input.extend(
+            display_items
+                .into_iter()
+                .map(|item| TurnInput::DisplayItem(Box::new(item))),
+        );
+        pending_input.extend(input.into_iter().map(TurnInput::ResponseItem));
         self.input_queue
-            .extend_pending_input_for_turn_state(
-                turn_state.as_ref(),
-                input.into_iter().map(TurnInput::ResponseItem).collect(),
-            )
+            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_input)
             .await;
         self.start_task(turn_context, Vec::new(), RegularTask::new())
             .await;

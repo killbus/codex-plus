@@ -2,59 +2,71 @@
 
 ## Goal
 
-在 integrated Codex core 中语义移植 `pi-shadow-mind`：全局 Markdown registry、
-per-thread 临时运行实例、受控并发、报告投递和 `/shadow` 管理面。参考实现只
-作为行为基准，不把 TypeScript 包或运行时依赖复制进 Rust workspace。
+让 integrated Codex 中的 Shadow 报告成为可识别、可回放的原生线程条目，并阻止
+Shadow 报告触发的主 Agent 自动跟进再次调度 Shadow。用户应能明确区分 Shadow
+原文与主 Agent 回复，同时不会因无行动报告形成持续消耗轮次和额度的反馈链。
 
-## Reference
+## Background
 
-`https://github.com/liuzhengdongfortest/pi-shadow-mind`，MIT，commit
-`ba75a67092024053f6529ef574d0cd81006ba6b1`。Child 1 的研究文档必须逐项引用
-该版本和 Codex source file:line 证据。
+- Shadow registry、scheduler、child session、epoch guard 和 `/shadow` 基础管理面已经
+  集成；本任务不重新实现这些能力。
+- 当前报告在 `codex-src/codex-rs/ext/shadow/src/lib.rs:827` 被包装为
+  `ResponseItem::Message(role = "user")`，文本前缀由同文件 `:905` 生成。
+- `codex-src/codex-rs/core/src/hook_runtime.rs:586` 只记录该 `ResponseItem`，不发出
+  `UserMessage`/turn-item 展示事件，因此 TUI 只显示随后主 Agent 的回复。
+- `codex-src/codex-rs/ext/shadow/src/lib.rs:551` 对每个完成后 idle 的主线程 turn 都可
+  再次 heartbeat；Shadow 自动跟进没有可信来源标记，因此会形成反馈链。
+- 原生扩展展示边界位于 `codex-src/codex-rs/ext/items/src/lib.rs:15`；app-server
+  转换位于 `app-server-protocol/src/protocol/v2/item.rs:905`；TUI live/replay 统一消费
+  completed item（`tui/src/chatwidget/protocol.rs:362`、`replay.rs:80`）。
 
 ## Requirements
 
-- R1 `ext/shadow` crate 注册到 extension registry，并由 `Feature::Shadow`
-  门控；未启用或 shadow 来源线程时无调度。
-- R2 registry 使用有效 `codex_home/shadow-minds/`，顶层 Markdown + config，
-  解析 frontmatter（id/name/enabled/debug/activation_probability/
-  active_for_models/run_with_model/thinking_level/timeout_seconds/tools），
-  last-known-good、冲突/损坏可见、原子替换写入。
-- R3 每个主 turn 在 `on_thread_idle` 恰好一次 heartbeat；error/stop 只收尾。
-  host 必须提供完成 turn/idle epoch；per-thread 实例快照定义，后台执行槽位与
-  主线程注入串行分别验收，第一版不暴露未实现的全局并发承诺。
-- R4 host 提供可取消的 `AgentSpawner`：继承 cwd/model/权限快照和净化轨迹，
-  标记 shadow session source，禁止 shadow-of-shadow；新用户 turn、abort、
-  timeout、thread stop 都取消并回收实例。
-- R5 report 必须携带 source turn/epoch，并通过 active-turn 或 idle-epoch 的
-  原子前提入口；迟到结果不得进入新 turn。批处理窗口只合并当前 epoch 报告。
-- R6 `/shadow` 支持 list/status/enable/disable/pause/resume/edit/create；
-  agent CRUD 工具与 config 写入先走 host approval/elicitation，拒绝即无写入。
-- R7 默认只读工具 + 显式白名单追加，内置 `report_to_main` 终止单次 shadow；
-  debug=true 保存 bounded metadata/session log，不泄露未授权参数。
-- R8 首期只移植 registry 校验、scheduler/trajectory 的最小闭环、报告通道和
-  list/status/pause/resume；summaries、batcher、entity CRUD 和全量 debug 语义
-  在有独立契约前不进入 integrated patch。
+- R1 新增 namespaced `ExtensionItem::ShadowReport`（wire kind `shadow.report`），字段至少
+  包含稳定 item id、shadow id、display name 和有硬上限的 accepted report content；app-server 暴露
+  对应的 `ThreadItem::ShadowReport`，不复用 `UserMessage`、`SubAgentActivity`、
+  `CollabAgentToolCall`、`HookPrompt` 或 review mode。
+- R2 模型可见输入与用户可见条目必须分离：原有报告仍可作为单次主 Agent 跟进的输入，
+  但展示条目必须明确归因于 Shadow，绝不渲染成用户气泡。缺少 `name` 时 display name
+  在 registry 解析处继续稳定回退到 `id`。进入展示与模型输入的报告正文必须在 UTF-8
+  字符边界按同一硬上限截断，避免无界模型上下文。
+- R3 只有通过 idle epoch/active-turn 原子前提并真正获准投递的报告才发出一次标准
+  `item/started` + `item/completed` 生命周期；stale、busy、cancelled、timed-out 或被
+  拒绝的报告不得留下可见条目，也不得启动跟进。
+- R4 host 为扩展启动的自动 turn 携带可信、非文本解析的 origin，并在下一次
+  `ThreadIdleInput` 中暴露完成 turn 的 origin。Shadow 跟进以 namespaced Shadow origin
+  启动；该 origin 完成后 Shadow scheduler 必须直接跳过。普通用户 turn、协作触发 turn
+  和 Goal 自动 continuation 的现有资格保持不变。
+- R5 live、`thread/resume`、legacy rollout 和 paginated item history 对同一报告呈现一致
+  的 identity/content/order。必要时扩展 rollout persistence policy，使
+  `ShadowReport` 的 completed item 在两种 history mode 都持久化。
+- R6 TUI 使用独立 history cell，首行显示 `Shadow · <display name>`，后续显示已接受的有界报告；
+  内容按既有 wrapping helper 换行，live 与 replay 走同一渲染入口并有 snapshot 覆盖。
 
 ## Acceptance Criteria
 
-- [ ] AC1 feature gate、registry、last-known-good 和 malformed/duplicate tests 通过，
-  并引用 `08-16-spike-validation/research/ground-facts.md`。
-- [ ] AC2 一个主 turn 只产生一个 heartbeat；并发槽位、取消、超时、线程停止和
-  shadow recursion tests 通过。
-- [ ] AC3 active report 与 idle report 分别经 expected-turn/idle-epoch 原子入口；
-  stale report 被拒绝并可观测。
-- [ ] AC4 `/shadow` 全部子命令有可观察结果；agent/config 写确认与拒绝测试通过。
-- [ ] AC5 工具白名单、报告终止、debug 日志、快照/无跨次记忆测试通过。
-- [ ] AC6 首期 pi 参考语义的 registry、调度、轨迹和校验有对应测试；其余语义
-  明确延期，不作为本 patch 的完成条件。
+- [ ] AC1 live Shadow 报告显示为 `Shadow · reviewer`（或配置的 name）及有界正文，且不会
+  出现用户消息归因；app-server JSON/TypeScript schema 包含 `shadowReport` item。
+- [ ] AC2 resume/replay 在 legacy 与 paginated history mode 中显示与 live 相同的
+  shadow id、display name、content 和相对顺序。
+- [ ] AC3 一个被接受的 Shadow 报告最多启动一个主 Agent 跟进，并只产生一个可见报告
+  条目；同一 idle epoch 的重复 delivery 不会重复显示或重复启动。
+- [ ] AC4 Shadow-origin 跟进完成后不再调度 Shadow；普通用户 turn 与 Goal 自动 turn
+  仍可触发正常 heartbeat，现有 Goal 行为与 immutable Goal patch 不变。
+- [ ] AC5 stale、busy、cancelled、timed-out、thread stop 和 pending user work 路径均
+  不产生可见报告或后续 turn。
+- [ ] AC6 missing-name 回退、extension item serde/TS、app-server 映射、rollout policy、
+  TUI live/replay snapshots 和反馈链回归测试全部通过。
 
 ## Out of Scope
 
-Shadow 间通信、学习/Gate、项目级 registry、跨次记忆、复杂 entity CRUD、主模型
-thinking 暴露和非 CLI 发行物。
+- 不修改 `patches/goal-old-continuation.patch`、Goal pause/error policy 或 Goal prompt。
+- 不扩展 `/shadow` CRUD、summaries、跨 Shadow 通信、跨次记忆、全量 debug 语义或
+  registry 写入审批。
+- 不把 Shadow 伪装成用户、协作 sub-agent 工具调用、hook 或 review session。
+- 不承诺在本任务中新增 Luna 调度能力；模型选择研究与 runtime 功能变更分离。
 
-## Dependencies / order
+## Dependencies / Order
 
-Child 1 spike 与 Child 2 inherit 可并行；本 child 等两者的 evidence/baseline
-后实现；CLI release 等 integrated shadow 通过 check。
+本任务在现有 Shadow runtime 与已验证 Goal baseline 上增量实现。实现和验证必须留在
+`.trellis/tasks/08-16-shadow-extension`，不得并入 `08-16-inherit-goal-patch`。

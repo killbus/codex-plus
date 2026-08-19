@@ -1338,6 +1338,39 @@
           "type": "object"
         },
         {
+          "description": "A completed report produced by a Shadow extension.",
+          "properties": {
+            "content": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "shadowId": {
+              "type": "string"
+            },
+            "shadowName": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "shadowReport"
+              ],
+              "title": "ShadowReportThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "content",
+            "id",
+            "shadowId",
+            "shadowName",
+            "type"
+          ],
+          "title": "ShadowReportThreadItem",
+          "type": "object"
+        },
+        {
           "properties": {
             "id": {
               "type": "string"

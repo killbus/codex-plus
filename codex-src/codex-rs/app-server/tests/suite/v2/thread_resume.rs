@@ -1964,6 +1964,166 @@ async fn dropped_stream_goal_turn_error_starts_next_automatic_turn_with_shadow()
 }
 
 #[tokio::test]
+async fn transient_http_goal_turn_errors_start_next_automatic_turn_with_shadow() -> Result<()> {
+    for (status, expected_error) in [
+        (
+            429,
+            codex_app_server_protocol::CodexErrorInfo::ResponseTooManyFailedAttempts {
+                http_status_code: Some(429),
+            },
+        ),
+        (
+            500,
+            codex_app_server_protocol::CodexErrorInfo::InternalServerError,
+        ),
+    ] {
+        run_transient_http_goal_turn_error(status, expected_error).await?;
+    }
+    Ok(())
+}
+
+async fn run_transient_http_goal_turn_error(
+    status: u16,
+    expected_error: codex_app_server_protocol::CodexErrorInfo,
+) -> Result<()> {
+    let server = responses::start_mock_server().await;
+    let create_goal = responses::sse(vec![
+        responses::ev_response_created("create-goal"),
+        responses::ev_function_call(
+            "call-create-goal",
+            "create_goal",
+            r#"{"objective":"finish the transient HTTP lifecycle test"}"#,
+        ),
+        responses::ev_completed("create-goal"),
+    ]);
+    let complete_goal = responses::sse(vec![
+        responses::ev_response_created("complete-goal"),
+        responses::ev_function_call(
+            "call-complete-goal",
+            "update_goal",
+            r#"{"status":"complete"}"#,
+        ),
+        responses::ev_completed("complete-goal"),
+    ]);
+    let done = create_final_assistant_message_sse_response("Done")?;
+    let transient_error = ResponseTemplate::new(status).set_body_json(json!({
+        "error": {
+            "type": "rate_limit_exceeded",
+            "message": format!("synthetic transient HTTP {status}"),
+        }
+    }));
+    responses::mount_response_sequence(
+        &server,
+        vec![
+            responses::sse_response(create_goal),
+            transient_error,
+            responses::sse_response(complete_goal),
+            responses::sse_response(done),
+        ],
+    )
+    .await;
+
+    let codex_home = TempDir::new()?;
+    mock_responses_config(&server.uri())
+        .enable_feature(Feature::Goals)
+        .enable_feature(Feature::Shadow)
+        .with_provider_config("supports_websockets = false")
+        .write(codex_home.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_managed_config()
+        .build_initialized()
+        .await?;
+
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            model: Some("gpt-5.2-codex".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let TurnStartResponse { turn } = mcp
+        .request(
+            |request_id| codex_app_server_protocol::ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    input: vec![UserInput::Text {
+                        text: "create a goal and survive a transient HTTP failure".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                },
+            },
+        )
+        .await?;
+
+    let failed: TurnCompletedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_notification("turn/completed"),
+    )
+    .await??;
+    assert_eq!(failed.turn.id, turn.id);
+    assert_eq!(failed.turn.status, TurnStatus::Failed);
+    assert_eq!(
+        failed
+            .turn
+            .error
+            .as_ref()
+            .and_then(|error| error.codex_error_info.clone()),
+        Some(expected_error)
+    );
+
+    let continued_notification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_matching_notification(
+            "next automatic turn/started after transient HTTP error",
+            |notification| {
+                notification.method == "turn/started"
+                    && notification
+                        .params
+                        .as_ref()
+                        .and_then(|params| params.get("turn"))
+                        .and_then(|turn| turn.get("id"))
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|turn_id| turn_id != turn.id)
+            },
+        ),
+    )
+    .await??;
+    let continued: TurnStartedNotification =
+        serde_json::from_value(continued_notification.params.expect("turn/started params"))?;
+    assert_eq!(continued.thread_id, thread.id);
+    assert_ne!(continued.turn.id, turn.id);
+
+    let get_id = mcp
+        .send_raw_request("thread/goal/get", Some(json!({ "threadId": thread.id })))
+        .await?;
+    let persisted: codex_app_server_protocol::ThreadGoalGetResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(get_id)).await??;
+    assert_eq!(
+        persisted.goal.expect("goal should remain persisted").status,
+        ThreadGoalStatus::Active
+    );
+
+    let completed: TurnCompletedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_notification("turn/completed"),
+    )
+    .await??;
+    assert_eq!(completed.turn.id, continued.turn.id);
+    assert_eq!(completed.turn.status, TurnStatus::Completed);
+    assert_eq!(
+        server
+            .received_requests()
+            .await
+            .expect("mock server should retain received requests")
+            .len(),
+        4
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn thread_goal_lifecycle_emits_analytics_and_clear_deletes_goal() -> Result<()> {
     let server = create_mock_responses_server_sequence_unchecked(vec![
         responses::sse(vec![

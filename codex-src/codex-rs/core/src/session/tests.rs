@@ -33,6 +33,9 @@ use codex_config::types::ToolSuggestDisabledTool;
 use codex_core_skills::HostSkillsSnapshot;
 use core_test_support::test_codex::local_selections;
 
+use codex_extension_api::AutomaticTurnOrigin;
+use codex_extension_items::ExtensionItem;
+use codex_extension_items::shadow::ShadowReportItem;
 use codex_features::Feature;
 use codex_http_client::HttpClientFactory;
 use codex_http_client::OutboundProxyPolicy;
@@ -225,6 +228,43 @@ fn user_message(text: &str) -> ResponseItem {
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
+}
+
+fn shadow_report_turn_item(id: &str) -> TurnItem {
+    TurnItem::Extension(ExtensionItem::ShadowReport(ShadowReportItem {
+        id: id.to_owned(),
+        shadow_id: "reviewer".to_owned(),
+        shadow_name: "Reviewer".to_owned(),
+        content: "report".to_owned(),
+    }))
+}
+
+fn shadow_report_turn_item_matches(actual: &TurnItem, expected: &TurnItem) -> bool {
+    match (actual, expected) {
+        (
+            TurnItem::Extension(ExtensionItem::ShadowReport(actual)),
+            TurnItem::Extension(ExtensionItem::ShadowReport(expected)),
+        ) => actual == expected,
+        _ => false,
+    }
+}
+
+fn drain_contains_item_lifecycle(
+    rx: &async_channel::Receiver<Event>,
+    expected_item: &TurnItem,
+) -> bool {
+    let mut found = false;
+    while let Ok(event) = rx.try_recv() {
+        if matches!(
+            event.msg,
+            EventMsg::ItemStarted(ItemStartedEvent { item, .. })
+                | EventMsg::ItemCompleted(ItemCompletedEvent { item, .. })
+                if shadow_report_turn_item_matches(&item, expected_item)
+        ) {
+            found = true;
+        }
+    }
+    found
 }
 
 #[test]
@@ -5539,7 +5579,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         git_enrichment_policy: GitEnrichmentPolicy::Fresh,
         next_internal_sub_id: AtomicU64::new(0),
         idle_epoch: AtomicU64::new(0),
-        last_completed_turn_id: Mutex::new(None),
+        last_completed_turn: Mutex::new(None),
     };
 
     (session, turn_context)
@@ -7703,7 +7743,7 @@ where
         git_enrichment_policy: GitEnrichmentPolicy::Fresh,
         next_internal_sub_id: AtomicU64::new(0),
         idle_epoch: AtomicU64::new(0),
-        last_completed_turn_id: Mutex::new(None),
+        last_completed_turn: Mutex::new(None),
     });
 
     (session, turn_context, rx_event)
@@ -9923,7 +9963,7 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
 
 #[tokio::test]
 async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
-    let (sess, tc, _rx) = make_session_and_context_with_rx().await;
+    let (sess, tc, rx) = make_session_and_context_with_rx().await;
     sess.spawn_task(
         Arc::clone(&tc),
         Vec::new(),
@@ -9935,17 +9975,26 @@ async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
     .await;
 
     let item = user_message("synthetic idle input");
+    let display_item = shadow_report_turn_item("shadow-busy");
     let err = sess
-        .try_start_turn_if_idle(vec![item.clone()])
+        .try_start_turn_if_idle_for_epoch_with_origin(
+            sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire),
+            AutomaticTurnOrigin::Extension("shadow".to_owned()),
+            vec![display_item.clone()],
+            vec![item.clone()],
+        )
         .await
         .expect_err("active turn should reject idle-only input");
 
     assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, err.reason());
     assert_eq!(vec![item], err.into_input());
-    assert_eq!(
-        Vec::<TurnInput>::new(),
-        sess.input_queue.get_pending_input(&sess.active_turn).await
+    assert!(
+        sess.input_queue
+            .get_pending_input(&sess.active_turn)
+            .await
+            .is_empty()
     );
+    assert!(!drain_contains_item_lifecycle(&rx, &display_item));
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }
@@ -9969,15 +10018,17 @@ async fn try_start_turn_if_idle_rejects_plan_mode_without_injecting() {
     assert_eq!(TryStartTurnIfIdleRejectionReason::PlanMode, err.reason());
     assert_eq!(vec![item], err.into_input());
     assert!(sess.active_turn.lock().await.is_none());
-    assert_eq!(
-        Vec::<TurnInput>::new(),
-        sess.input_queue.get_pending_input(&sess.active_turn).await
+    assert!(
+        sess.input_queue
+            .get_pending_input(&sess.active_turn)
+            .await
+            .is_empty()
     );
 }
 
 #[tokio::test]
 async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting() {
-    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
+    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
     sess.input_queue
         .enqueue_mailbox_communication(InterAgentCommunication::new(
             AgentPath::root(),
@@ -9989,8 +10040,14 @@ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting()
         .await;
 
     let item = user_message("synthetic idle input");
+    let display_item = shadow_report_turn_item("shadow-pending");
     let err = sess
-        .try_start_turn_if_idle(vec![item.clone()])
+        .try_start_turn_if_idle_for_epoch_with_origin(
+            sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire),
+            AutomaticTurnOrigin::Extension("shadow".to_owned()),
+            vec![display_item.clone()],
+            vec![item.clone()],
+        )
         .await
         .expect_err("pending trigger-turn mail should reject automatic idle input");
 
@@ -10001,6 +10058,7 @@ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting()
     assert_eq!(vec![item], err.into_input());
     assert!(sess.active_turn.lock().await.is_none());
     assert!(sess.input_queue.has_trigger_turn_mailbox_items().await);
+    assert!(!drain_contains_item_lifecycle(&rx, &display_item));
 }
 
 #[tokio::test]
@@ -10024,9 +10082,11 @@ async fn try_start_turn_if_idle_rejects_active_review_turn_without_injecting() {
 
     assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, err.reason());
     assert_eq!(vec![item], err.into_input());
-    assert_eq!(
-        Vec::<TurnInput>::new(),
-        sess.input_queue.get_pending_input(&sess.active_turn).await
+    assert!(
+        sess.input_queue
+            .get_pending_input(&sess.active_turn)
+            .await
+            .is_empty()
     );
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
@@ -10063,13 +10123,19 @@ async fn inject_if_running_for_turn_rejects_mismatch_and_accepts_match() {
 
 #[tokio::test]
 async fn try_start_turn_if_idle_for_epoch_rejects_stale_epoch() {
-    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
+    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
     sess.idle_epoch
         .store(2, std::sync::atomic::Ordering::Release);
     let item = user_message("stale shadow report");
+    let display_item = shadow_report_turn_item("shadow-stale");
 
     let err = sess
-        .try_start_turn_if_idle_for_epoch(1, vec![item.clone()])
+        .try_start_turn_if_idle_for_epoch_with_origin(
+            1,
+            AutomaticTurnOrigin::Extension("shadow".to_owned()),
+            vec![display_item.clone()],
+            vec![item.clone()],
+        )
         .await
         .expect_err("stale idle epoch should reject automatic input");
 
@@ -10079,6 +10145,78 @@ async fn try_start_turn_if_idle_for_epoch_rejects_stale_epoch() {
     );
     assert_eq!(vec![item], err.into_input());
     assert!(sess.active_turn.lock().await.is_none());
+    assert!(!drain_contains_item_lifecycle(&rx, &display_item));
+}
+
+#[tokio::test]
+async fn try_start_turn_if_idle_with_origin_orders_shadow_item_and_rejects_duplicate() {
+    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
+    let display_item = shadow_report_turn_item("shadow-accepted");
+    let model_item = user_message("accepted shadow report");
+    let idle_epoch = sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire);
+
+    sess.try_start_turn_if_idle_for_epoch_with_origin(
+        idle_epoch,
+        AutomaticTurnOrigin::Extension("shadow".to_owned()),
+        vec![display_item.clone()],
+        vec![model_item.clone()],
+    )
+    .await
+    .expect("idle Shadow delivery should start");
+
+    let active_origin = sess
+        .active_turn
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|active_turn| active_turn.task.as_ref())
+        .map(|task| task.turn_context.automatic_turn_origin.clone());
+    assert_eq!(
+        active_origin,
+        Some(AutomaticTurnOrigin::Extension("shadow".to_owned()))
+    );
+
+    let duplicate = sess
+        .try_start_turn_if_idle_for_epoch_with_origin(
+            sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire),
+            AutomaticTurnOrigin::Extension("shadow".to_owned()),
+            vec![display_item.clone()],
+            vec![model_item],
+        )
+        .await
+        .expect_err("active Shadow follow-up should reject duplicate delivery");
+    assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, duplicate.reason());
+
+    let lifecycle = timeout(StdDuration::from_secs(2), async {
+        let mut lifecycle = Vec::new();
+        while lifecycle.len() < 3 {
+            let event = rx.recv().await.expect("event channel open");
+            match event.msg {
+                EventMsg::TurnStarted(_) => lifecycle.push("turnStarted"),
+                EventMsg::ItemStarted(ItemStartedEvent { item, .. })
+                    if shadow_report_turn_item_matches(&item, &display_item) =>
+                {
+                    lifecycle.push("itemStarted");
+                }
+                EventMsg::ItemCompleted(ItemCompletedEvent { item, .. })
+                    if shadow_report_turn_item_matches(&item, &display_item) =>
+                {
+                    lifecycle.push("itemCompleted");
+                }
+                _ => {}
+            }
+        }
+        lifecycle
+    })
+    .await
+    .expect("Shadow item lifecycle should be emitted");
+    assert_eq!(
+        lifecycle,
+        vec!["turnStarted", "itemStarted", "itemCompleted"]
+    );
+
+    assert!(!drain_contains_item_lifecycle(&rx, &display_item));
+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }
 
 #[tokio::test]
@@ -10261,12 +10399,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
     sess.abort_all_tasks(TurnAbortReason::Replaced).await;
 
     assert!(sess.active_turn.lock().await.is_none());
-    assert_eq!(
-        sess.input_queue
-            .take_pending_input_for_turn_state(turn_state.as_ref())
-            .await,
-        vec![TurnInput::ResponseItem(pending_item)]
-    );
+    let pending_input = sess
+        .input_queue
+        .take_pending_input_for_turn_state(turn_state.as_ref())
+        .await;
+    let [TurnInput::ResponseItem(actual_pending_item)] = pending_input.as_slice() else {
+        panic!("expected one pending response item");
+    };
+    assert_eq!(actual_pending_item, &pending_item);
 }
 
 async fn set_total_token_usage(sess: &Session, total_token_usage: TokenUsage) {
@@ -10309,17 +10449,21 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
         !sess.input_queue.has_pending_input(&sess.active_turn).await,
         "queue-only mailbox mail should stay buffered once the current turn emitted its answer"
     );
-    assert_eq!(
-        sess.input_queue.get_pending_input(&sess.active_turn).await,
-        Vec::new()
+    assert!(
+        sess.input_queue
+            .get_pending_input(&sess.active_turn)
+            .await
+            .is_empty()
     );
 
     sess.abort_all_tasks(TurnAbortReason::Replaced).await;
 
-    assert_eq!(
-        sess.input_queue.get_pending_input(&sess.active_turn).await,
-        vec![TurnInput::InterAgentCommunication(communication)],
-    );
+    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
+    let [TurnInput::InterAgentCommunication(actual_communication)] = pending_input.as_slice()
+    else {
+        panic!("expected one pending mailbox communication");
+    };
+    assert_eq!(actual_communication, &communication);
 }
 
 #[tokio::test]
@@ -10397,19 +10541,23 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
     .await
     .expect("steered input should be accepted");
 
+    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
+    let [
+        TurnInput::UserInput { content, client_id },
+        TurnInput::InterAgentCommunication(actual_communication),
+    ] = pending_input.as_slice()
+    else {
+        panic!("expected steered input followed by mailbox communication");
+    };
     assert_eq!(
-        sess.input_queue.get_pending_input(&sess.active_turn).await,
-        vec![
-            TurnInput::UserInput {
-                content: vec![UserInput::Text {
-                    text: "follow up".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                client_id: None
-            },
-            TurnInput::InterAgentCommunication(communication),
-        ],
+        content,
+        &[UserInput::Text {
+            text: "follow up".to_string(),
+            text_elements: Vec::new(),
+        }]
     );
+    assert_eq!(client_id, &None);
+    assert_eq!(actual_communication, &communication);
 }
 
 #[tokio::test]
@@ -10455,19 +10603,23 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
         .await;
 
+    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
+    let [
+        TurnInput::UserInput { content, client_id },
+        TurnInput::InterAgentCommunication(actual_communication),
+    ] = pending_input.as_slice()
+    else {
+        panic!("expected steered input followed by mailbox communication");
+    };
     assert_eq!(
-        sess.input_queue.get_pending_input(&sess.active_turn).await,
-        vec![
-            TurnInput::UserInput {
-                content: vec![UserInput::Text {
-                    text: "follow up".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                client_id: None
-            },
-            TurnInput::InterAgentCommunication(communication),
-        ],
+        content,
+        &[UserInput::Text {
+            text: "follow up".to_string(),
+            text_elements: Vec::new(),
+        }]
     );
+    assert_eq!(client_id, &None);
+    assert_eq!(actual_communication, &communication);
 }
 
 #[tokio::test]
@@ -10519,10 +10671,12 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
 
     assert!(output.needs_follow_up);
     assert!(output.tool_future.is_some());
-    assert_eq!(
-        sess.input_queue.get_pending_input(&sess.active_turn).await,
-        vec![TurnInput::InterAgentCommunication(communication)],
-    );
+    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
+    let [TurnInput::InterAgentCommunication(actual_communication)] = pending_input.as_slice()
+    else {
+        panic!("expected one pending mailbox communication");
+    };
+    assert_eq!(actual_communication, &communication);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

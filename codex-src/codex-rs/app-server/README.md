@@ -1465,6 +1465,7 @@ The app-server streams JSON-RPC notifications while a turn is running. Each turn
 - `webSearch` — `{id, query, action?, results?}` for a web search request issued by the agent; `action` mirrors the Responses API web_search action payload (`search`, `open_page`, `find_in_page`) and may be omitted until completion. For standalone web search, `results` contains the out-of-band structured result DTOs returned by `/v1/alpha/search`; clients should ignore result types and fields they do not understand.
 - `imageView` — `{id, path}` emitted when the agent invokes the image viewer tool.
 - `sleep` — `{id, durationMs}` emitted while the agent waits for a duration or new input.
+- `shadowReport` — `{id, shadowId, shadowName, content}` containing a report produced by the named Shadow extension. It is extension-generated content, not a user message, so clients should render it with Shadow attribution instead of a user-message treatment.
 - `enteredReviewMode` — `{id, review}` sent when the reviewer starts; `review` is a short user-facing label such as `"current changes"` or the requested target description.
 - `exitedReviewMode` — `{id, review}` emitted when the reviewer finishes; `review` is the full plain-text review (usually, overall notes plus bullet point findings).
 - `contextCompaction` — `{id}` emitted when codex compacts the conversation history. This can happen automatically.
@@ -1473,7 +1474,7 @@ The app-server streams JSON-RPC notifications while a turn is running. Each turn
 All items emit shared lifecycle events:
 
 - `item/started` — emits the full `item` when a new unit of work begins so the UI can render it immediately; the `item.id` in this payload matches the `itemId` used by deltas.
-- `item/completed` — sends the final `item` once that work itself finishes (for example, after a tool call or message completes); treat this as the authoritative execution/result state.
+- `item/completed` — sends the final `item` once that work itself finishes (for example, after a tool call or message completes); treat this as the authoritative execution/result state. Completed `shadowReport` items are durable and are returned in resumed/replayed thread history in their original relative order.
 - `item/autoApprovalReview/started` — [UNSTABLE] temporary auto-review notification carrying `{threadId, turnId, targetItemId, review, action}` when approval auto-review begins. This shape is expected to change soon.
 - `item/autoApprovalReview/completed` — [UNSTABLE] temporary auto-review notification carrying `{threadId, turnId, targetItemId, review, action}` when approval auto-review resolves. This shape is expected to change soon.
 

@@ -1,4 +1,3 @@
-use codex_extension_api::ExtensionData;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TurnAbortReason;
@@ -29,8 +28,12 @@ impl Session {
         }
     }
 
-    pub(super) async fn emit_turn_stop_lifecycle(&self, turn_store: &ExtensionData) {
-        *self.last_completed_turn_id.lock().await = Some(turn_store.level_id().to_owned());
+    pub(super) async fn emit_turn_stop_lifecycle(&self, turn_context: &TurnContext) {
+        *self.last_completed_turn.lock().await = Some((
+            turn_context.sub_id.clone(),
+            turn_context.automatic_turn_origin.clone(),
+        ));
+        let turn_store = turn_context.extension_data.as_ref();
         for contributor in self.services.extensions.turn_lifecycle_contributors() {
             contributor
                 .on_turn_stop(codex_extension_api::TurnStopInput {
@@ -49,13 +52,14 @@ impl Session {
             return;
         }
 
-        let completed_turn_id = self.last_completed_turn_id.lock().await.clone();
+        let completed_turn = self.last_completed_turn.lock().await.clone();
         let idle_epoch = self.idle_epoch.load(Ordering::Acquire);
         let trajectory = self.extension_conversation_history().await;
         for contributor in self.services.extensions.thread_lifecycle_contributors() {
             contributor
                 .on_thread_idle(codex_extension_api::ThreadIdleInput {
-                    completed_turn_id: completed_turn_id.as_deref(),
+                    completed_turn_id: completed_turn.as_ref().map(|(id, _)| id.as_str()),
+                    completed_turn_origin: completed_turn.as_ref().map(|(_, origin)| origin),
                     idle_epoch,
                     trajectory: trajectory.clone(),
                     session_store: &self.services.session_extension_data,
@@ -68,9 +72,13 @@ impl Session {
     pub(super) async fn emit_turn_abort_lifecycle(
         &self,
         reason: TurnAbortReason,
-        turn_store: &ExtensionData,
+        turn_context: &TurnContext,
     ) {
-        *self.last_completed_turn_id.lock().await = Some(turn_store.level_id().to_owned());
+        *self.last_completed_turn.lock().await = Some((
+            turn_context.sub_id.clone(),
+            turn_context.automatic_turn_origin.clone(),
+        ));
+        let turn_store = turn_context.extension_data.as_ref();
         for contributor in self.services.extensions.turn_lifecycle_contributors() {
             contributor
                 .on_turn_abort(codex_extension_api::TurnAbortInput {

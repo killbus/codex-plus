@@ -557,7 +557,7 @@ pub(crate) async fn inspect_pending_input(
             )
             .await
         }
-        TurnInput::ResponseItem(_) => HookRuntimeOutcome {
+        TurnInput::DisplayItem(_) | TurnInput::ResponseItem(_) => HookRuntimeOutcome {
             should_stop: false,
             additional_contexts: Vec::new(),
         },
@@ -582,6 +582,10 @@ pub(crate) async fn record_pending_input(
                 client_id,
             )
             .await;
+        }
+        TurnInput::DisplayItem(item) => {
+            sess.emit_turn_item_started(turn_context, &item).await;
+            sess.emit_turn_item_completed(turn_context, *item).await;
         }
         TurnInput::ResponseItem(item) => {
             sess.record_conversation_items(turn_context, std::slice::from_ref(&item))

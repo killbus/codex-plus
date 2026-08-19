@@ -189,6 +189,12 @@ impl ChatWidget {
             ThreadItem::ContextCompaction { .. } => {
                 self.add_info_message("Context compacted".to_string(), /*hint*/ None);
             }
+            ThreadItem::ShadowReport(item) => {
+                self.add_to_history(history_cell::new_shadow_report(
+                    item.shadow_name,
+                    item.content,
+                ));
+            }
             ThreadItem::HookPrompt { .. } => {}
             ThreadItem::CollabAgentToolCall {
                 id,

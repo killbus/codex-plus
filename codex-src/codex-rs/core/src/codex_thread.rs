@@ -6,6 +6,7 @@ use crate::session::SessionSettingsUpdate;
 use crate::session::SteerInputError;
 use crate::session::session::Session;
 use codex_exec_server::SelectedCapabilityRootsStatus;
+use codex_extension_api::AutomaticTurnOrigin;
 use codex_features::Feature;
 use codex_otel::SessionTelemetry;
 use codex_protocol::ThreadId;
@@ -16,6 +17,7 @@ use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
+use codex_protocol::items::TurnItem;
 use codex_protocol::mcp::CallToolResult;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::ContentItem;
@@ -370,6 +372,24 @@ impl CodexThread {
     ) -> Result<(), TryStartTurnIfIdleError> {
         self.session
             .try_start_turn_if_idle_for_epoch(expected_idle_epoch, items)
+            .await
+    }
+
+    /// Starts origin-tagged automatic idle work and emits its accepted display items.
+    pub async fn try_start_turn_if_idle_for_epoch_with_origin(
+        &self,
+        expected_idle_epoch: u64,
+        automatic_turn_origin: AutomaticTurnOrigin,
+        display_items: Vec<TurnItem>,
+        items: Vec<ResponseItem>,
+    ) -> Result<(), TryStartTurnIfIdleError> {
+        self.session
+            .try_start_turn_if_idle_for_epoch_with_origin(
+                expected_idle_epoch,
+                automatic_turn_origin,
+                display_items,
+                items,
+            )
             .await
     }
 

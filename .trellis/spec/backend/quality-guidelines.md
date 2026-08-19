@@ -257,6 +257,86 @@ Correct: keep the imported Goal patch byte-for-byte unchanged, layer Shadow
 directly on it, and use behavior tests plus ordered provenance to prove both the
 policy and its reconstruction.
 
+## Scenario: Native Shadow report delivery
+
+### 1. Scope / Trigger
+
+Apply this contract whenever Shadow reports enter a main-Agent turn, an
+extension-originated automatic turn is added, or app-server/TUI history gains a
+new Shadow representation.
+
+### 2. Signatures
+
+- Durable extension item: `ExtensionItem::ShadowReport(ShadowReportItem)` with
+  wire kind `shadow.report` and fields `id`, `shadow_id`, `shadow_name`, `content`.
+- Public app-server item: `ThreadItem::ShadowReport(ShadowReportItem)` with wire
+  discriminator `shadowReport`.
+- Trusted automatic-turn metadata:
+  `AutomaticTurnOrigin::{Unspecified, Extension(String)}`.
+- Idle callback: `ThreadIdleInput { completed_turn_id,
+  completed_turn_origin, idle_epoch, ... }`.
+
+### 3. Contracts
+
+Shadow identity is carried by the typed item, never recovered from report text.
+An accepted report queues a display-only `TurnItem` before its model-visible
+`ResponseItem`; the regular turn emits `turn/started` before the display item's
+standard `item/started` and `item/completed` lifecycle. The display item does not
+enter model context. Both representations use one UTF-8-safe report body capped
+by `MAX_SHADOW_REPORT_CONTENT_BYTES`.
+
+The follow-up turn starts with `Extension("shadow")`. When that same origin is
+reported at the next idle edge, Shadow skips heartbeat scheduling. User turns,
+Goal continuations, and other extension origins retain their existing eligibility.
+Completed Shadow report items persist in both legacy and paginated history and
+map to the same app-server/TUI identity, content, and order on replay.
+
+### 4. Validation & Error Matrix
+
+- Accepted current idle epoch with no pending work -> one visible report and one
+  main-Agent follow-up.
+- Shadow-origin completed turn -> no new Shadow heartbeat.
+- User, Goal, unspecified, or non-Shadow extension origin -> normal eligibility.
+- Stale epoch, busy/Plan state, or pending trigger work -> no display item and no
+  automatic turn.
+- Cancel, timeout, user input, or thread stop before delivery -> clear undelivered
+  reports and emit nothing.
+- Oversized or multibyte report -> truncate once at a valid UTF-8 byte boundary;
+  display and model copies remain identical.
+- Missing generated JSON/TypeScript `shadowReport` fixture -> GitHub workflow
+  fails schema drift validation.
+
+### 5. Good/Base/Bad Cases
+
+- Good: TUI shows `Shadow · Reviewer` and the accepted report, then the main
+  Agent replies; replay shows the same report in the same relative position.
+- Base: a Goal automatic continuation remains eligible for Shadow scheduling.
+- Bad: parse `[shadow:reviewer]` to determine origin, render the report as a user
+  message, emit the item before `turn/started`, or let a Shadow follow-up schedule
+  another Shadow run.
+
+### 6. Tests Required
+
+- Serde/schema tests assert `shadow.report` internally and `shadowReport` at the
+  app-server boundary with all four payload fields.
+- Core tests assert accepted display/model ordering and prove stale, busy, Plan,
+  and pending-work rejection emits no display lifecycle.
+- Shadow tests assert one-time report draining, UTF-8-safe size limits,
+  cancellation cleanup, Shadow-only origin suppression, and Goal/user eligibility.
+- Rollout and thread-history tests assert legacy/paginated persistence and replay
+  order; TUI snapshots assert live/replay identity, wrapping, and raw transcript.
+- GitHub Actions runs the affected package tests, schema generation/drift check,
+  clippy/type-check, Goal patch hash, and ordered provenance verification.
+
+### 7. Wrong vs Correct
+
+Wrong: inject a `[shadow:<name>]` user-role message and infer both UI identity and
+feedback suppression by parsing that model-visible text.
+
+Correct: pair a typed display-only item with the bounded model input inside the
+accepted idle turn, attach trusted runtime origin metadata, and suppress only
+`Extension("shadow")` at the following idle edge.
+
 ## Forbidden Patterns
 
 - Do not run Rust compilation locally when the task requires GitHub Actions.

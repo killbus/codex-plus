@@ -25,7 +25,14 @@ Goal 补丁迁移到 `codex-plus`，产出可重建的 goal-only 基线；集成
 - R2 rebuild pristine from the upstream commit, apply the original patch, and
   compare manifests/hashes to the goal-only snapshot; record expected materialized
   differences.
-- R3 run the source regression and a real turn-error -> idle continuation test.
+- R3 run the source regression and real turn-error -> idle continuation tests for
+  a post-handshake stream disconnect, generic HTTP 429, and HTTP 5xx. A service
+  response explicitly typed as `usage_limit_reached` retains the inherited pause.
+- R3b keep Guardian/automatic approval inside its existing bounded retry loop when
+  the reviewer fails with a structured transient transport error, including stream
+  disconnect, connection failure, HTTP 5xx, and generic HTTP 429 represented as
+  `ResponseTooManyFailedAttempts`. Hard usage/quota errors, valid denials,
+  cancellation, and timeout remain terminal.
 - R3a verify `shadow-mind.patch` applies directly after the original Goal patch and
   a real post-handshake stream disconnect still starts the next automatic turn.
 - R4 preserve the exact source version/toolchain and provenance in README/decisions.
@@ -37,11 +44,18 @@ Goal 补丁迁移到 `codex-plus`，产出可重建的 goal-only 基线；集成
 - [ ] AC2 official commit and patch dry-run are independently verified; no source
   path on a particular developer machine is required.
 - [ ] AC3 concrete `CodexErrorInfo` tests cover usage-limit pause and the inherited
-  broad compatibility behavior in both goal-only and Shadow-integrated states.
+  broad compatibility behavior in both goal-only and Shadow-integrated states;
+  app-server regressions prove generic HTTP 429 and HTTP 5xx start a different
+  automatic turn while the Goal remains Active.
+- [ ] AC3b Guardian classifier and request-level regressions prove a generic HTTP
+  429 is retried within the automatic approval service and can subsequently approve
+  without asking the user; existing stream-disconnect/5xx retry coverage remains
+  green, while hard usage limits and valid denials are not retried.
 - [ ] AC4 fixed-toolchain test/build commands are reproducible or explicitly marked
   unavailable on the current host.
 
 ## Out of Scope
 
-Changing the inherited Goal error policy, Shadow implementation details, and release
+Changing the inherited Goal error policy, globally widening `CodexErr::is_retryable`,
+unbounding Guardian retries, Shadow runtime ownership details, and release
 publication belong outside this child.

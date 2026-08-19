@@ -11,6 +11,7 @@ use codex_core::config::Config;
 use codex_core::config::Constrained;
 use codex_core::config::Permissions;
 use codex_extension_api::AgentSpawner;
+use codex_extension_api::AutomaticTurnOrigin;
 use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ExtensionRegistryBuilder;
 use codex_extension_api::ThreadIdleInput;
@@ -21,9 +22,12 @@ use codex_extension_api::TurnAbortInput;
 use codex_extension_api::TurnErrorInput;
 use codex_extension_api::TurnLifecycleContributor;
 use codex_extension_api::TurnStartInput;
+use codex_extension_items::ExtensionItem;
+use codex_extension_items::shadow::ShadowReportItem;
 use codex_features::Feature;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
+use codex_protocol::items::TurnItem;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::ResponseItem;
@@ -57,6 +61,10 @@ use tokio::sync::SemaphorePermit;
 
 pub const DEFAULT_MAX_PARALLEL: usize = 2;
 pub const DEFAULT_REPORT_BATCH_WINDOW_MS: u64 = 400;
+/// Maximum UTF-8 bytes retained from a Shadow report before it is shown or
+/// injected into the main model context. The byte cap is below the 10K-token
+/// item limit even when the tokenizer falls back to one token per byte.
+pub const MAX_SHADOW_REPORT_CONTENT_BYTES: usize = 8_000;
 pub const MAX_TRAJECTORY_CHARS: usize = 32_000;
 pub const MAX_TRAJECTORY_ITEM_CHARS: usize = 4_000;
 
@@ -233,6 +241,7 @@ impl ThreadRuntime {
         for run in self.runs().values() {
             run.cancel();
         }
+        self.reports().clear();
     }
 
     /// The only lifecycle edge allowed to schedule a heartbeat.
@@ -562,6 +571,9 @@ where
             let Some(completed_turn_id) = input.completed_turn_id else {
                 return;
             };
+            if !shadow_heartbeat_allowed(input.completed_turn_origin) {
+                return;
+            }
             if !state.runtime.schedule_once(completed_turn_id) {
                 return;
             }
@@ -799,7 +811,7 @@ async fn run_shadow<S>(
     let report = ShadowReport {
         shadow_id: shadow.id.clone(),
         shadow_name: shadow.name.clone(),
-        content,
+        content: truncate_shadow_report_content(content),
         epoch: expected_epoch,
         run_id: run.run_id.clone(),
     };
@@ -824,14 +836,20 @@ async fn run_shadow<S>(
         state.runtime.finish_run(&run.run_id);
         return;
     }
-    let items = reports
-        .into_iter()
-        .map(|report| shadow_report_item(&report))
+    let display_items = reports.iter().map(shadow_report_item).collect::<Vec<_>>();
+    let model_items = reports
+        .iter()
+        .map(shadow_report_response_item)
         .collect::<Vec<_>>();
     if let Some(manager) = host.thread_manager.upgrade()
         && let Ok(parent) = manager.get_thread(state.thread_id).await
         && let Err(error) = parent
-            .try_start_turn_if_idle_for_epoch(expected_epoch, items)
+            .try_start_turn_if_idle_for_epoch_with_origin(
+                expected_epoch,
+                AutomaticTurnOrigin::Extension("shadow".to_owned()),
+                display_items,
+                model_items,
+            )
             .await
     {
         tracing::debug!(reason = ?error.reason(), "shadow report dropped at idle boundary");
@@ -844,6 +862,22 @@ fn deterministic_roll(seed: &str, shadow_id: &str) -> f64 {
     seed.hash(&mut hasher);
     shadow_id.hash(&mut hasher);
     (hasher.finish() as f64) / (u64::MAX as f64)
+}
+
+fn shadow_heartbeat_allowed(origin: Option<&AutomaticTurnOrigin>) -> bool {
+    !origin.is_some_and(|origin| origin.is_extension("shadow"))
+}
+
+fn truncate_shadow_report_content(mut content: String) -> String {
+    if content.len() <= MAX_SHADOW_REPORT_CONTENT_BYTES {
+        return content;
+    }
+    let mut end = MAX_SHADOW_REPORT_CONTENT_BYTES;
+    while !content.is_char_boundary(end) {
+        end -= 1;
+    }
+    content.truncate(end);
+    content
 }
 
 fn format_shadow_prompt(
@@ -902,7 +936,16 @@ fn sanitize_trajectory(history: &codex_extension_api::ConversationHistory) -> St
     output
 }
 
-fn shadow_report_item(report: &ShadowReport) -> ResponseItem {
+fn shadow_report_item(report: &ShadowReport) -> TurnItem {
+    TurnItem::Extension(ExtensionItem::ShadowReport(ShadowReportItem {
+        id: format!("shadow-report-{}", report.run_id),
+        shadow_id: report.shadow_id.clone(),
+        shadow_name: report.shadow_name.clone(),
+        content: report.content.clone(),
+    }))
+}
+
+fn shadow_report_response_item(report: &ShadowReport) -> ResponseItem {
     ResponseItem::Message {
         id: None,
         role: "user".to_owned(),
@@ -941,6 +984,20 @@ mod tests {
         assert!(runtime.schedule_once("turn-1"));
         assert!(!runtime.schedule_once("turn-1"));
         assert!(runtime.schedule_once("turn-2"));
+    }
+
+    #[test]
+    fn shadow_origin_alone_suppresses_heartbeat() {
+        assert!(!shadow_heartbeat_allowed(Some(
+            &AutomaticTurnOrigin::Extension("shadow".to_owned())
+        )));
+        assert!(shadow_heartbeat_allowed(None));
+        assert!(shadow_heartbeat_allowed(Some(
+            &AutomaticTurnOrigin::Unspecified
+        )));
+        assert!(shadow_heartbeat_allowed(Some(
+            &AutomaticTurnOrigin::Extension("goal".to_owned())
+        )));
     }
 
     #[test]
@@ -1015,6 +1072,53 @@ mod tests {
         assert!(output.len() <= MAX_TRAJECTORY_CHARS);
     }
 
+    #[test]
+    fn shadow_report_content_is_utf8_safely_bounded_for_display_and_model() {
+        let content = format!("{}界tail", "a".repeat(MAX_SHADOW_REPORT_CONTENT_BYTES - 1));
+        let report = ShadowReport {
+            shadow_id: "reviewer".to_owned(),
+            shadow_name: "Reviewer".to_owned(),
+            content: truncate_shadow_report_content(content),
+            epoch: 0,
+            run_id: "1".to_owned(),
+        };
+
+        assert_eq!(
+            report.content,
+            "a".repeat(MAX_SHADOW_REPORT_CONTENT_BYTES - 1)
+        );
+        assert!(report.content.len() <= MAX_SHADOW_REPORT_CONTENT_BYTES);
+        let TurnItem::Extension(ExtensionItem::ShadowReport(display_item)) =
+            shadow_report_item(&report)
+        else {
+            panic!("expected shadow report display item");
+        };
+        let ResponseItem::Message { content, .. } = shadow_report_response_item(&report) else {
+            panic!("expected shadow report model message");
+        };
+        let [ContentItem::InputText { text }] = content.as_slice() else {
+            panic!("expected one model text item");
+        };
+        assert_eq!(display_item.content, report.content);
+        assert_eq!(text, &format!("[shadow:Reviewer] {}", report.content));
+    }
+
+    #[test]
+    fn accepted_report_is_drained_once() {
+        let runtime = ThreadRuntime::default();
+        let report = ShadowReport {
+            shadow_id: "reviewer".to_owned(),
+            shadow_name: "Reviewer".to_owned(),
+            content: "accepted".to_owned(),
+            epoch: runtime.epoch(),
+            run_id: "1".to_owned(),
+        };
+
+        assert!(runtime.accept_idle_report(report.clone(), runtime.epoch()));
+        assert_eq!(runtime.take_reports_for_delivery(), vec![report]);
+        assert!(runtime.take_reports_for_delivery().is_empty());
+    }
+
     #[tokio::test]
     async fn cancellation_and_timeout_are_distinct() {
         let runtime = ThreadRuntime::default();
@@ -1029,6 +1133,7 @@ mod tests {
             .await,
             WaitOutcome::Cancelled
         );
+        assert!(runtime.take_reports().is_empty());
 
         let run = runtime.start_run();
         assert_eq!(
@@ -1040,6 +1145,31 @@ mod tests {
             .await,
             WaitOutcome::TimedOut
         );
+        assert!(runtime.take_reports().is_empty());
+    }
+
+    #[test]
+    fn cancel_and_user_input_clear_undelivered_reports() {
+        let runtime = ThreadRuntime::default();
+        let run = runtime.start_run();
+        let report = ShadowReport {
+            shadow_id: "reviewer".to_owned(),
+            shadow_name: "Reviewer".to_owned(),
+            content: "pending".to_owned(),
+            epoch: runtime.epoch(),
+            run_id: run.run_id.clone(),
+        };
+        assert!(runtime.accept_idle_report(report.clone(), runtime.epoch()));
+
+        runtime.cancel_runs();
+        assert!(run.is_cancelled());
+        assert!(runtime.take_reports().is_empty());
+
+        let run = runtime.start_run();
+        assert!(runtime.accept_idle_report(report, runtime.epoch()));
+        runtime.begin_user_input();
+        assert!(run.is_cancelled());
+        assert!(runtime.take_reports().is_empty());
     }
 
     #[test]
@@ -1087,6 +1217,17 @@ mod tests {
                 file_path: PathBuf::from("reviewer.md"),
             }
         );
+    }
+
+    #[test]
+    fn registry_uses_shadow_id_as_missing_name_fallback() {
+        let shadow = parse_shadow_markdown(
+            "---\nid: reviewer\n---\ncheck",
+            PathBuf::from("reviewer.md"),
+        )
+        .expect("parse");
+
+        assert_eq!(shadow.name, shadow.id);
     }
 
     #[test]

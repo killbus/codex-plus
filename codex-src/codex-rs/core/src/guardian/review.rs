@@ -920,6 +920,7 @@ fn should_retry_guardian_review(outcome: &GuardianReviewOutcome) -> bool {
             GuardianReviewError::Session {
                 error_info: Some(
                     CodexErrorInfo::ServerOverloaded
+                        | CodexErrorInfo::ResponseTooManyFailedAttempts { .. }
                         | CodexErrorInfo::HttpConnectionFailed { .. }
                         | CodexErrorInfo::ResponseStreamConnectionFailed { .. }
                         | CodexErrorInfo::InternalServerError
@@ -975,6 +976,9 @@ mod review_tests {
         };
         let transient_error_info = [
             CodexErrorInfo::ServerOverloaded,
+            CodexErrorInfo::ResponseTooManyFailedAttempts {
+                http_status_code: Some(429),
+            },
             CodexErrorInfo::HttpConnectionFailed {
                 http_status_code: Some(502),
             },
@@ -1016,6 +1020,13 @@ mod review_tests {
                 GuardianReviewOutcome::Error(GuardianReviewError::session_with_error_info(
                     anyhow::anyhow!("bad request"),
                     CodexErrorInfo::BadRequest,
+                )),
+                false,
+            ),
+            (
+                GuardianReviewOutcome::Error(GuardianReviewError::session_with_error_info(
+                    anyhow::anyhow!("hard usage limit"),
+                    CodexErrorInfo::UsageLimitExceeded,
                 )),
                 false,
             ),

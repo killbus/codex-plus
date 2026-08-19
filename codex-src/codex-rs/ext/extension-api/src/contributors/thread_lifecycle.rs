@@ -40,10 +40,27 @@ pub struct ThreadResumeInput<'a> {
     pub thread_store: &'a ExtensionData,
 }
 
+/// Trusted origin metadata for a host-started automatic turn.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AutomaticTurnOrigin {
+    /// A turn without an extension-specific origin.
+    Unspecified,
+    /// A turn started by the named extension.
+    Extension(String),
+}
+
+impl AutomaticTurnOrigin {
+    pub fn is_extension(&self, name: &str) -> bool {
+        matches!(self, Self::Extension(origin) if origin == name)
+    }
+}
+
 /// Input supplied when the host has no immediately pending thread work.
 pub struct ThreadIdleInput<'a> {
     /// The main turn whose completion produced this idle edge.
     pub completed_turn_id: Option<&'a str>,
+    /// Trusted origin of the completed turn, when it was host-started automatically.
+    pub completed_turn_origin: Option<&'a AutomaticTurnOrigin>,
     /// Monotonic host epoch. Starting any new main turn invalidates old epochs.
     pub idle_epoch: u64,
     /// Host-owned raw history snapshot for extensions that need bounded context.

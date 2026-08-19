@@ -1,1 +1,4 @@
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "check 核对 shadow 扩展是否保持内核/TUI/权限三层一致"}
+{"file": ".trellis/tasks/08-16-shadow-extension/research/shadow-report-lifecycle.md", "reason": "Verify implementation against grounded native API and feedback-chain cause"}
+{"file": "codex-src/AGENTS.md", "reason": "Enforce Rust tests, TUI snapshots, API compatibility, fmt/fix ordering, and full-suite approval"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check identity/content/origin data flow across every layer"}
+{"file": ".trellis/spec/guides/cross-platform-thinking-guide.md", "reason": "Check protocol and rollout compatibility across clients and history modes"}

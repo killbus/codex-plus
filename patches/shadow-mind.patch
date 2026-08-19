@@ -1,3 +1,48 @@
+diff --git a/codex-rs/Cargo.lock b/codex-rs/Cargo.lock
+index ab630ef467daea78c257295423f5fe6df08cdfea..6f6a2fdcf792d888320db65fcd14a22d7f31603b 100644
+--- a/codex-rs/Cargo.lock
++++ b/codex-rs/Cargo.lock
+@@ -1998,6 +1998,7 @@ dependencies = [
+  "codex-rmcp-client",
+  "codex-rollout",
+  "codex-sandboxing",
++ "codex-shadow-extension",
+  "codex-shell-command",
+  "codex-skills",
+  "codex-skills-extension",
+@@ -3937,6 +3938,24 @@ dependencies = [
+  "tracing",
+ ]
+ 
++[[package]]
++name = "codex-shadow-extension"
++version = "0.0.0"
++dependencies = [
++ "codex-core",
++ "codex-extension-api",
++ "codex-extension-items",
++ "codex-features",
++ "codex-protocol",
++ "serde",
++ "serde_json",
++ "serde_yaml",
++ "tempfile",
++ "thiserror 2.0.18",
++ "tokio",
++ "tracing",
++]
++
+ [[package]]
+ name = "codex-shell-command"
+ version = "0.0.0"
+@@ -4168,6 +4187,7 @@ dependencies = [
+  "codex-protocol",
+  "codex-rollout",
+  "codex-sandboxing",
++ "codex-shadow-extension",
+  "codex-shell-command",
+  "codex-state",
+  "codex-terminal-detection",
 diff --git a/codex-rs/Cargo.toml b/codex-rs/Cargo.toml
 index e921ef9993b5f7b0febe349074d65cccaba02bff..6b3ce91412323d5e2cf7d5a88624c16f33082411 100644
 --- a/codex-rs/Cargo.toml
@@ -18,6 +63,1005 @@ index e921ef9993b5f7b0febe349074d65cccaba02bff..6b3ce91412323d5e2cf7d5a88624c16f
  codex-skills = { path = "skills" }
  codex-state = { path = "state" }
  codex-stdio-to-uds = { path = "stdio-to-uds" }
+diff --git a/codex-rs/analytics/src/reducer.rs b/codex-rs/analytics/src/reducer.rs
+index b5ef11f64e3802cc43598836db9cefa45b0bb640..7c8b0684b50c2b6d8e4b7746f9e8affee194faae 100644
+--- a/codex-rs/analytics/src/reducer.rs
++++ b/codex-rs/analytics/src/reducer.rs
+@@ -413,7 +413,8 @@ impl TurnToolCounts {
+             | ThreadItem::Sleep(_)
+             | ThreadItem::EnteredReviewMode { .. }
+             | ThreadItem::ExitedReviewMode { .. }
+-            | ThreadItem::ContextCompaction { .. } => return,
++            | ThreadItem::ContextCompaction { .. }
++            | ThreadItem::ShadowReport(_) => return,
+         }
+         self.total += 1;
+     }
+@@ -1755,7 +1756,8 @@ fn tracked_tool_item_id(item: &ThreadItem) -> Option<&str> {
+         | ThreadItem::Sleep(_)
+         | ThreadItem::EnteredReviewMode { .. }
+         | ThreadItem::ExitedReviewMode { .. }
+-        | ThreadItem::ContextCompaction { .. } => None,
++        | ThreadItem::ContextCompaction { .. }
++        | ThreadItem::ShadowReport(_) => None,
+     }
+ }
+ 
+diff --git a/codex-rs/app-server-protocol/schema/json/ServerNotification.json b/codex-rs/app-server-protocol/schema/json/ServerNotification.json
+index 3fbb2df3e49225c571606ec55fbd4ec2d115a3ff..e02ae30734ee61f579bf0998a108253d71a37ace 100644
+--- a/codex-rs/app-server-protocol/schema/json/ServerNotification.json
++++ b/codex-rs/app-server-protocol/schema/json/ServerNotification.json
+@@ -4640,6 +4640,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json
+index 27446544f466e527311e77a49c744196118af278..d40eea9b2f531ef93678e7d4aca52b35cb20d3f8 100644
+--- a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json
++++ b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json
+@@ -19239,6 +19239,39 @@
+             "title": "SleepThreadItem",
+             "type": "object"
+           },
++          {
++            "description": "A completed report produced by a Shadow extension.",
++            "properties": {
++              "content": {
++                "type": "string"
++              },
++              "id": {
++                "type": "string"
++              },
++              "shadowId": {
++                "type": "string"
++              },
++              "shadowName": {
++                "type": "string"
++              },
++              "type": {
++                "enum": [
++                  "shadowReport"
++                ],
++                "title": "ShadowReportThreadItemType",
++                "type": "string"
++              }
++            },
++            "required": [
++              "content",
++              "id",
++              "shadowId",
++              "shadowName",
++              "type"
++            ],
++            "title": "ShadowReportThreadItem",
++            "type": "object"
++          },
+           {
+             "properties": {
+               "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json
+index 3960c8e0eb3ffeadaf50ee19c2a8b8693349f70a..328390e7a11a83927adf6bf8faddbddfc0a4eee0 100644
+--- a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json
++++ b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json
+@@ -17003,6 +17003,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ItemCompletedNotification.json b/codex-rs/app-server-protocol/schema/json/v2/ItemCompletedNotification.json
+index a83056ed4539da9a4d577668c05544a6228ce715..ccbfeaa2f4d064aba00bcd6263d75e612710367e 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ItemCompletedNotification.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ItemCompletedNotification.json
+@@ -1192,6 +1192,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ItemStartedNotification.json b/codex-rs/app-server-protocol/schema/json/v2/ItemStartedNotification.json
+index 0c99b79b89ebf11706617e0decdee7b2a64d7c83..c271b09f289b57b41d1fca8475ff9009acb2c764 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ItemStartedNotification.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ItemStartedNotification.json
+@@ -1192,6 +1192,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ReviewStartResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ReviewStartResponse.json
+index 071b06a4a57ff1c56fb1608b86587f0f983be88c..1928b457c8bc217896543de5ef18a4656fe9ea58 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ReviewStartResponse.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ReviewStartResponse.json
+@@ -1337,6 +1337,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadForkResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadForkResponse.json
+index c69777948649eafe27ebcf981521104da3ba2a84..b1dd96a32f8acbdcecd8bfab9be0f1898265da78 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ThreadForkResponse.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadForkResponse.json
+@@ -1865,6 +1865,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadListResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadListResponse.json
+index 5b64c33981daa785058e868986b570475978b45d..7d05260b8b32d7592dd496b0ce3cc44c064f1328 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ThreadListResponse.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadListResponse.json
+@@ -1656,6 +1656,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadMetadataUpdateResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadMetadataUpdateResponse.json
+index 7423f89fd7d058a8e30754d964bb034ed7563f94..89a5a1a47e743dcc91df060d5dfd11efe95f0b58 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ThreadMetadataUpdateResponse.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadMetadataUpdateResponse.json
+@@ -1656,6 +1656,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadReadResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadReadResponse.json
+index ed061e1616eee20c4d7421495c994e595eedf7db..fa9dcbdd983c68fde5f41b43590116677b577649 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ThreadReadResponse.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadReadResponse.json
+@@ -1656,6 +1656,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeResponse.json
+index df2fd0218b32e3d9ef546d47a3ef855db10e7a04..303359dfcd5b4a31b8bcec716886df4ee453a46d 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeResponse.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeResponse.json
+@@ -1865,6 +1865,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadRollbackResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadRollbackResponse.json
+index 4264629db423829cb51fca6077f7c8e6fc82784e..5a05dfdafef14bf0ccc943a02461ce7500169f3c 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ThreadRollbackResponse.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadRollbackResponse.json
+@@ -1656,6 +1656,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadStartResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadStartResponse.json
+index 5d40babf4dc21c8e8843260e69bc7a762af7c9f1..f5243d11a9f1b4e3c2d8d72481fdcd94b9fb2d09 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ThreadStartResponse.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadStartResponse.json
+@@ -1865,6 +1865,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadStartedNotification.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadStartedNotification.json
+index 3b0288ebcc0096c439cf5cdfe3a42abca377b5e0..24a4f151198ca0915cfea057c5b1bf6f66c3e302 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ThreadStartedNotification.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadStartedNotification.json
+@@ -1656,6 +1656,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadUnarchiveResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadUnarchiveResponse.json
+index 3fa6217a3afdad265511e2ea16813602a7ef440e..d880d0c48d1780cc210f4b9d42929c6d9438edfb 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/ThreadUnarchiveResponse.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadUnarchiveResponse.json
+@@ -1656,6 +1656,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json b/codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json
+index 7ac5c78f33c40250f1b0238cbe5ac462e4c787a7..3c5b0d373893e428c1277cf856b1d7591acef57c 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json
+@@ -1337,6 +1337,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json b/codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json
+index 1d38983832b2c74dff4ecc4c90f02bf9cb26ea50..f181ce39e97b8d0be9db3761610b1ab4daac095b 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json
+@@ -1337,6 +1337,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/json/v2/TurnStartedNotification.json b/codex-rs/app-server-protocol/schema/json/v2/TurnStartedNotification.json
+index d91e66f191c62f6d947bf078215666513ed9a006..5d1fbc7de531fba4678046cff19e9d45dd39b53b 100644
+--- a/codex-rs/app-server-protocol/schema/json/v2/TurnStartedNotification.json
++++ b/codex-rs/app-server-protocol/schema/json/v2/TurnStartedNotification.json
+@@ -1337,6 +1337,39 @@
+           "title": "SleepThreadItem",
+           "type": "object"
+         },
++        {
++          "description": "A completed report produced by a Shadow extension.",
++          "properties": {
++            "content": {
++              "type": "string"
++            },
++            "id": {
++              "type": "string"
++            },
++            "shadowId": {
++              "type": "string"
++            },
++            "shadowName": {
++              "type": "string"
++            },
++            "type": {
++              "enum": [
++                "shadowReport"
++              ],
++              "title": "ShadowReportThreadItemType",
++              "type": "string"
++            }
++          },
++          "required": [
++            "content",
++            "id",
++            "shadowId",
++            "shadowName",
++            "type"
++          ],
++          "title": "ShadowReportThreadItem",
++          "type": "object"
++        },
+         {
+           "properties": {
+             "id": {
+diff --git a/codex-rs/app-server-protocol/schema/typescript/ShadowReportItem.ts b/codex-rs/app-server-protocol/schema/typescript/ShadowReportItem.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5b3c82fc59230fb750a243eba9195a0d0a06e60b
+--- /dev/null
++++ b/codex-rs/app-server-protocol/schema/typescript/ShadowReportItem.ts
+@@ -0,0 +1,8 @@
++// GENERATED CODE! DO NOT MODIFY BY HAND!
++
++// This file was generated by [ts-rs](https://github.com/Aleph-Alpha/ts-rs). Do not edit this file manually.
++
++/**
++ * A completed report produced by a Shadow extension.
++ */
++export type ShadowReportItem = { id: string, shadowId: string, shadowName: string, content: string, };
+diff --git a/codex-rs/app-server-protocol/schema/typescript/index.ts b/codex-rs/app-server-protocol/schema/typescript/index.ts
+index 8080f942ad87216781646b8f79eff4dd3b28eacb..303cd9ac7567d2abfa529f8bc85666f0ae0e7f4c 100644
+--- a/codex-rs/app-server-protocol/schema/typescript/index.ts
++++ b/codex-rs/app-server-protocol/schema/typescript/index.ts
+@@ -78,6 +78,7 @@ export type { ServerNotificationEnvelope } from "./ServerNotificationEnvelope";
+ export type { ServerRequest } from "./ServerRequest";
+ export type { SessionSource } from "./SessionSource";
+ export type { Settings } from "./Settings";
++export type { ShadowReportItem } from "./ShadowReportItem";
+ export type { SleepItem } from "./SleepItem";
+ export type { SubAgentSource } from "./SubAgentSource";
+ export type { ThreadId } from "./ThreadId";
+diff --git a/codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts b/codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts
+index df1a5dbe344a5b8e746795c1dab78924b09a2f95..84d0bd71aee45f2118e16d8b7f1336a65cd94b35 100644
+--- a/codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts
++++ b/codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts
+@@ -5,6 +5,7 @@ import type { ImageGenerationItem } from "../ImageGenerationItem";
+ import type { LegacyAppPathString } from "../LegacyAppPathString";
+ import type { MessagePhase } from "../MessagePhase";
+ import type { ReasoningEffort } from "../ReasoningEffort";
++import type { ShadowReportItem } from "../ShadowReportItem";
+ import type { SleepItem } from "../SleepItem";
+ import type { WebSearchItem } from "../WebSearchItem";
+ import type { JsonValue } from "../serde_json/JsonValue";
+@@ -106,4 +107,4 @@ reasoningEffort: ReasoningEffort | null,
+ /**
+  * Last known status of the target agents, when available.
+  */
+-agentsStates: { [key in string]?: CollabAgentState }, } | { "type": "subAgentActivity", id: string, kind: SubAgentActivityKind, agentThreadId: string, agentPath: string, } | { "type": "webSearch" } & WebSearchItem | { "type": "imageView", id: string, path: LegacyAppPathString, } | { "type": "sleep" } & SleepItem | { "type": "imageGeneration" } & ImageGenerationItem | { "type": "enteredReviewMode", id: string, review: string, } | { "type": "exitedReviewMode", id: string, review: string, } | { "type": "contextCompaction", id: string, };
++agentsStates: { [key in string]?: CollabAgentState }, } | { "type": "subAgentActivity", id: string, kind: SubAgentActivityKind, agentThreadId: string, agentPath: string, } | { "type": "webSearch" } & WebSearchItem | { "type": "imageView", id: string, path: LegacyAppPathString, } | { "type": "sleep" } & SleepItem | { "type": "shadowReport" } & ShadowReportItem | { "type": "imageGeneration" } & ImageGenerationItem | { "type": "enteredReviewMode", id: string, review: string, } | { "type": "exitedReviewMode", id: string, review: string, } | { "type": "contextCompaction", id: string, };
+diff --git a/codex-rs/app-server-protocol/src/protocol/thread_history.rs b/codex-rs/app-server-protocol/src/protocol/thread_history.rs
+index eccdd750925fb2768fe3a1a75502dcdfd562faa4..ea24433e572d048b650900bfdc0bf129636585ad 100644
+--- a/codex-rs/app-server-protocol/src/protocol/thread_history.rs
++++ b/codex-rs/app-server-protocol/src/protocol/thread_history.rs
+@@ -1606,6 +1606,7 @@ mod tests {
+     use super::*;
+     use crate::protocol::v2::CommandExecutionSource;
+     use codex_extension_items::ExtensionItem as CoreExtensionItem;
++    use codex_extension_items::shadow::ShadowReportItem as CoreShadowReportItem;
+     use codex_extension_items::sleep::SleepItem as CoreSleepItem;
+     use codex_protocol::ThreadId;
+     use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem as CoreDynamicToolCallOutputContentItem;
+@@ -2031,6 +2032,55 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn rebuilds_shadow_report_from_persisted_completion() {
++        let turn_id = "turn-1";
++        let thread_id = ThreadId::new();
++        let shadow_report = CoreShadowReportItem {
++            id: "shadow-report-1".to_string(),
++            shadow_id: "reviewer".to_string(),
++            shadow_name: "Reviewer".to_string(),
++            content: "Check the persistence boundary.".to_string(),
++        };
++        let events = vec![
++            EventMsg::TurnStarted(TurnStartedEvent {
++                turn_id: turn_id.to_string(),
++                trace_id: None,
++                started_at: None,
++                model_context_window: None,
++                collaboration_mode_kind: Default::default(),
++            }),
++            EventMsg::ItemCompleted(ItemCompletedEvent {
++                thread_id,
++                turn_id: turn_id.to_string(),
++                item: CoreTurnItem::Extension(CoreExtensionItem::ShadowReport(
++                    shadow_report.clone(),
++                )),
++                completed_at_ms: 1_000,
++            }),
++            EventMsg::TurnComplete(TurnCompleteEvent {
++                turn_id: turn_id.to_string(),
++                started_at: None,
++                last_agent_message: None,
++                error: None,
++                completed_at: None,
++                duration_ms: None,
++                time_to_first_token_ms: None,
++            }),
++        ];
++        let items = events
++            .into_iter()
++            .map(RolloutItem::EventMsg)
++            .collect::<Vec<_>>();
++
++        let turns = build_turns_from_rollout_items(&items);
++
++        assert_eq!(
++            turns[0].items,
++            vec![ThreadItem::ShadowReport(shadow_report)]
++        );
++    }
++
+     #[test]
+     fn rebuilds_extension_image_generation_item_from_persisted_completion() {
+         let turn_id = "turn-1";
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/item.rs b/codex-rs/app-server-protocol/src/protocol/v2/item.rs
+index e26fa35baa82beadfe28d405fa3e524a5b4f4c1c..b264e5b3b14cd75df08faa50614e8fa126f96726 100644
+--- a/codex-rs/app-server-protocol/src/protocol/v2/item.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/item.rs
+@@ -14,6 +14,7 @@ use crate::protocol::item_builders::review_output_text;
+ use codex_experimental_api_macros::ExperimentalApi;
+ use codex_extension_items::ExtensionItem;
+ pub use codex_extension_items::image_generation::ImageGenerationItem;
++pub use codex_extension_items::shadow::ShadowReportItem;
+ pub use codex_extension_items::sleep::SleepItem;
+ pub use codex_extension_items::web_search::WebSearchAction;
+ pub use codex_extension_items::web_search::WebSearchItem;
+@@ -370,6 +371,7 @@ pub enum ThreadItem {
+         path: LegacyAppPathString,
+     },
+     Sleep(SleepItem),
++    ShadowReport(ShadowReportItem),
+     ImageGeneration(ImageGenerationItem),
+     #[serde(rename_all = "camelCase")]
+     #[ts(rename_all = "camelCase")]
+@@ -429,6 +431,7 @@ impl ThreadItem {
+             | ThreadItem::ContextCompaction { id, .. } => id,
+             ThreadItem::WebSearch(item) => &item.id,
+             ThreadItem::Sleep(item) => &item.id,
++            ThreadItem::ShadowReport(item) => &item.id,
+             ThreadItem::ImageGeneration(item) => &item.id,
+         }
+     }
+@@ -905,6 +908,7 @@ impl From<CoreTurnItem> for ThreadItem {
+             CoreTurnItem::Extension(extension) => match extension {
+                 ExtensionItem::ImageGeneration(item) => ThreadItem::ImageGeneration(item),
+                 ExtensionItem::Sleep(item) => ThreadItem::Sleep(item),
++                ExtensionItem::ShadowReport(item) => ThreadItem::ShadowReport(item),
+                 ExtensionItem::WebSearch(item) => ThreadItem::WebSearch(item),
+             },
+             CoreTurnItem::ImageGeneration(image) => {
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/tests.rs b/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
+index 7b38dceb2d85c36a8bd31e2bb9c5710c9bd7d369..8a5dccc11de2203ba1fdb43c7d7850cf5a892c8f 100644
+--- a/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
+@@ -2891,6 +2891,30 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
+         ThreadItem::WebSearch(expected_search_item)
+     );
+ 
++    let shadow_report = codex_extension_items::shadow::ShadowReportItem {
++        id: "shadow-report-1".to_string(),
++        shadow_id: "reviewer".to_string(),
++        shadow_name: "Reviewer".to_string(),
++        content: "Use the typed item boundary.".to_string(),
++    };
++    let shadow_thread_item = ThreadItem::ShadowReport(shadow_report.clone());
++    assert_eq!(
++        ThreadItem::from(TurnItem::Extension(
++            codex_extension_items::ExtensionItem::ShadowReport(shadow_report),
++        )),
++        shadow_thread_item
++    );
++    assert_eq!(
++        serde_json::to_value(shadow_thread_item).expect("serialize shadow report"),
++        json!({
++            "type": "shadowReport",
++            "id": "shadow-report-1",
++            "shadowId": "reviewer",
++            "shadowName": "Reviewer",
++            "content": "Use the typed item boundary.",
++        })
++    );
++
+     let image_view_item = TurnItem::ImageView(ImageViewItem {
+         id: "view-image-1".to_string(),
+         path: PathUri::from_abs_path(&test_path_buf("/tmp/view-image.png").abs()),
 diff --git a/codex-rs/app-server/Cargo.toml b/codex-rs/app-server/Cargo.toml
 index ef18d17b87b05d8d48b757e9ca1e2aaa8a7e0584..81d00b86f26b8699398b7406f19dee0e80704fca 100644
 --- a/codex-rs/app-server/Cargo.toml
@@ -30,6 +1074,27 @@ index ef18d17b87b05d8d48b757e9ca1e2aaa8a7e0584..81d00b86f26b8699398b7406f19dee0e
  codex-skills = { workspace = true }
  codex-skills-extension = { workspace = true }
  codex-utils-cli = { workspace = true }
+diff --git a/codex-rs/app-server/README.md b/codex-rs/app-server/README.md
+index 40d76de738e4dd6c2ebd83566a297dc77113a39d..f1f30aa7081b4a6d4abcdb4f25f102d8b8bdd05a 100644
+--- a/codex-rs/app-server/README.md
++++ b/codex-rs/app-server/README.md
+@@ -1465,6 +1465,7 @@ The app-server streams JSON-RPC notifications while a turn is running. Each turn
+ - `webSearch` — `{id, query, action?, results?}` for a web search request issued by the agent; `action` mirrors the Responses API web_search action payload (`search`, `open_page`, `find_in_page`) and may be omitted until completion. For standalone web search, `results` contains the out-of-band structured result DTOs returned by `/v1/alpha/search`; clients should ignore result types and fields they do not understand.
+ - `imageView` — `{id, path}` emitted when the agent invokes the image viewer tool.
+ - `sleep` — `{id, durationMs}` emitted while the agent waits for a duration or new input.
++- `shadowReport` — `{id, shadowId, shadowName, content}` containing a report produced by the named Shadow extension. It is extension-generated content, not a user message, so clients should render it with Shadow attribution instead of a user-message treatment.
+ - `enteredReviewMode` — `{id, review}` sent when the reviewer starts; `review` is a short user-facing label such as `"current changes"` or the requested target description.
+ - `exitedReviewMode` — `{id, review}` emitted when the reviewer finishes; `review` is the full plain-text review (usually, overall notes plus bullet point findings).
+ - `contextCompaction` — `{id}` emitted when codex compacts the conversation history. This can happen automatically.
+@@ -1473,7 +1474,7 @@ The app-server streams JSON-RPC notifications while a turn is running. Each turn
+ All items emit shared lifecycle events:
+ 
+ - `item/started` — emits the full `item` when a new unit of work begins so the UI can render it immediately; the `item.id` in this payload matches the `itemId` used by deltas.
+-- `item/completed` — sends the final `item` once that work itself finishes (for example, after a tool call or message completes); treat this as the authoritative execution/result state.
++- `item/completed` — sends the final `item` once that work itself finishes (for example, after a tool call or message completes); treat this as the authoritative execution/result state. Completed `shadowReport` items are durable and are returned in resumed/replayed thread history in their original relative order.
+ - `item/autoApprovalReview/started` — [UNSTABLE] temporary auto-review notification carrying `{threadId, turnId, targetItemId, review, action}` when approval auto-review begins. This shape is expected to change soon.
+ - `item/autoApprovalReview/completed` — [UNSTABLE] temporary auto-review notification carrying `{threadId, turnId, targetItemId, review, action}` when approval auto-review resolves. This shape is expected to change soon.
+ 
 diff --git a/codex-rs/app-server/src/extensions.rs b/codex-rs/app-server/src/extensions.rs
 index 10fa319f62fc3aba05d019586f593b06f91cd595..3dd82cf00af7daab193737d9eb9efa0edfae7347 100644
 --- a/codex-rs/app-server/src/extensions.rs
@@ -224,10 +1289,26 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..f8773afec1ef0290baded09ba059f415
  async fn thread_goal_lifecycle_emits_analytics_and_clear_deletes_goal() -> Result<()> {
      let server = create_mock_responses_server_sequence_unchecked(vec![
 diff --git a/codex-rs/core/src/codex_thread.rs b/codex-rs/core/src/codex_thread.rs
-index 6eba281d5b3bbb1660db5581d64a35549a706331..15dd9ba1825312af3de6ade2c4fe404bac753f96 100644
+index 6eba281d5b3bbb1660db5581d64a35549a706331..8edb6970b50215cbf45b2e75d55d1926553c5180 100644
 --- a/codex-rs/core/src/codex_thread.rs
 +++ b/codex-rs/core/src/codex_thread.rs
-@@ -97,6 +97,8 @@ pub enum TryStartTurnIfIdleRejectionReason {
+@@ -6,6 +6,7 @@ use crate::session::SessionSettingsUpdate;
+ use crate::session::SteerInputError;
+ use crate::session::session::Session;
+ use codex_exec_server::SelectedCapabilityRootsStatus;
++use codex_extension_api::AutomaticTurnOrigin;
+ use codex_features::Feature;
+ use codex_otel::SessionTelemetry;
+ use codex_protocol::ThreadId;
+@@ -16,6 +17,7 @@ use codex_protocol::config_types::ReasoningSummary;
+ use codex_protocol::config_types::WindowsSandboxLevel;
+ use codex_protocol::error::CodexErr;
+ use codex_protocol::error::Result as CodexResult;
++use codex_protocol::items::TurnItem;
+ use codex_protocol::mcp::CallToolResult;
+ use codex_protocol::models::ActivePermissionProfile;
+ use codex_protocol::models::ContentItem;
+@@ -97,6 +99,8 @@ pub enum TryStartTurnIfIdleRejectionReason {
      /// Another turn or task is active, or the idle reservation was lost before
      /// the automatic turn could start.
      Busy,
@@ -236,7 +1317,7 @@ index 6eba281d5b3bbb1660db5581d64a35549a706331..15dd9ba1825312af3de6ade2c4fe404b
  }
  
  /// Rejection returned when an extension asks to start automatic idle work but
-@@ -329,6 +331,17 @@ impl CodexThread {
+@@ -329,6 +333,17 @@ impl CodexThread {
          self.session.inject_if_running(items).await
      }
  
@@ -254,7 +1335,7 @@ index 6eba281d5b3bbb1660db5581d64a35549a706331..15dd9ba1825312af3de6ade2c4fe404b
      /// Starts an automatic regular turn with model-visible items only when idle
      /// work is allowed for this thread.
      ///
-@@ -349,6 +362,17 @@ impl CodexThread {
+@@ -349,6 +364,35 @@ impl CodexThread {
          self.session.try_start_turn_if_idle(items).await
      }
  
@@ -269,22 +1350,69 @@ index 6eba281d5b3bbb1660db5581d64a35549a706331..15dd9ba1825312af3de6ade2c4fe404b
 +            .await
 +    }
 +
++    /// Starts origin-tagged automatic idle work and emits its accepted display items.
++    pub async fn try_start_turn_if_idle_for_epoch_with_origin(
++        &self,
++        expected_idle_epoch: u64,
++        automatic_turn_origin: AutomaticTurnOrigin,
++        display_items: Vec<TurnItem>,
++        items: Vec<ResponseItem>,
++    ) -> Result<(), TryStartTurnIfIdleError> {
++        self.session
++            .try_start_turn_if_idle_for_epoch_with_origin(
++                expected_idle_epoch,
++                automatic_turn_origin,
++                display_items,
++                items,
++            )
++            .await
++    }
++
      pub async fn set_app_server_client_info(
          &self,
          app_server_client_name: Option<String>,
+diff --git a/codex-rs/core/src/hook_runtime.rs b/codex-rs/core/src/hook_runtime.rs
+index c9fe099332b7ec68ca892d6366cdf3155519b96a..2ae4d77def702175db897799370cbd3933fd1e67 100644
+--- a/codex-rs/core/src/hook_runtime.rs
++++ b/codex-rs/core/src/hook_runtime.rs
+@@ -557,7 +557,7 @@ pub(crate) async fn inspect_pending_input(
+             )
+             .await
+         }
+-        TurnInput::ResponseItem(_) => HookRuntimeOutcome {
++        TurnInput::DisplayItem(_) | TurnInput::ResponseItem(_) => HookRuntimeOutcome {
+             should_stop: false,
+             additional_contexts: Vec::new(),
+         },
+@@ -583,6 +583,10 @@ pub(crate) async fn record_pending_input(
+             )
+             .await;
+         }
++        TurnInput::DisplayItem(item) => {
++            sess.emit_turn_item_started(turn_context, &item).await;
++            sess.emit_turn_item_completed(turn_context, *item).await;
++        }
+         TurnInput::ResponseItem(item) => {
+             sess.record_conversation_items(turn_context, std::slice::from_ref(&item))
+                 .await;
 diff --git a/codex-rs/core/src/session/inject.rs b/codex-rs/core/src/session/inject.rs
-index 3e086964c391d899f927fbf7cce8f141c6517aa9..2eaff371faaa8740a64ad6e9f60d3b9313d2d45f 100644
+index 3e086964c391d899f927fbf7cce8f141c6517aa9..5394f135038590c2f0afc355e7aee253b45dd477 100644
 --- a/codex-rs/core/src/session/inject.rs
 +++ b/codex-rs/core/src/session/inject.rs
-@@ -9,6 +9,7 @@ use crate::tasks::RegularTask;
+@@ -6,9 +6,12 @@ use crate::codex_thread::TryStartTurnIfIdleRejectionReason;
+ use crate::state::ActiveTurn;
+ use crate::state::TurnState;
+ use crate::tasks::RegularTask;
++use codex_extension_api::AutomaticTurnOrigin;
  use codex_protocol::config_types::ModeKind;
++use codex_protocol::items::TurnItem;
  use codex_protocol::models::ResponseItem;
  use std::sync::Arc;
 +use std::sync::atomic::Ordering;
  
  impl Session {
      /// Returns the input if there is no active turn to inject into.
-@@ -35,6 +36,37 @@ impl Session {
+@@ -35,6 +38,37 @@ impl Session {
          }
      }
  
@@ -322,13 +1450,18 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..2eaff371faaa8740a64ad6e9f60d3b93
      /// Starts a regular turn with the provided items only if automatic idle work
      /// is allowed for the current session state.
      ///
-@@ -45,6 +77,24 @@ impl Session {
+@@ -45,6 +79,52 @@ impl Session {
      pub(crate) async fn try_start_turn_if_idle(
          self: &Arc<Self>,
          input: Vec<ResponseItem>,
 +    ) -> Result<(), TryStartTurnIfIdleError> {
-+        self.try_start_turn_if_idle_inner(/*expected_idle_epoch*/ None, input)
-+            .await
++        self.try_start_turn_if_idle_inner(
++            /*expected_idle_epoch*/ None,
++            AutomaticTurnOrigin::Unspecified,
++            Vec::new(),
++            input,
++        )
++        .await
 +    }
 +
 +    pub(crate) async fn try_start_turn_if_idle_for_epoch(
@@ -336,18 +1469,41 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..2eaff371faaa8740a64ad6e9f60d3b93
 +        expected_idle_epoch: u64,
 +        input: Vec<ResponseItem>,
 +    ) -> Result<(), TryStartTurnIfIdleError> {
-+        self.try_start_turn_if_idle_inner(Some(expected_idle_epoch), input)
-+            .await
++        self.try_start_turn_if_idle_inner(
++            Some(expected_idle_epoch),
++            AutomaticTurnOrigin::Unspecified,
++            Vec::new(),
++            input,
++        )
++        .await
++    }
++
++    pub(crate) async fn try_start_turn_if_idle_for_epoch_with_origin(
++        self: &Arc<Self>,
++        expected_idle_epoch: u64,
++        automatic_turn_origin: AutomaticTurnOrigin,
++        display_items: Vec<TurnItem>,
++        input: Vec<ResponseItem>,
++    ) -> Result<(), TryStartTurnIfIdleError> {
++        self.try_start_turn_if_idle_inner(
++            Some(expected_idle_epoch),
++            automatic_turn_origin,
++            display_items,
++            input,
++        )
++        .await
 +    }
 +
 +    async fn try_start_turn_if_idle_inner(
 +        self: &Arc<Self>,
 +        expected_idle_epoch: Option<u64>,
++        automatic_turn_origin: AutomaticTurnOrigin,
++        display_items: Vec<TurnItem>,
 +        input: Vec<ResponseItem>,
      ) -> Result<(), TryStartTurnIfIdleError> {
          if input.is_empty() {
              return Ok(());
-@@ -64,6 +114,14 @@ impl Session {
+@@ -64,6 +144,14 @@ impl Session {
  
          let turn_state = {
              let mut active_turn = self.active_turn.lock().await;
@@ -362,20 +1518,116 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..2eaff371faaa8740a64ad6e9f60d3b93
              if active_turn.is_some() {
                  return Err(TryStartTurnIfIdleError::new(
                      TryStartTurnIfIdleRejectionReason::Busy,
+@@ -84,7 +172,10 @@ impl Session {
+         }
+ 
+         let turn_context = self
+-            .new_default_turn_with_sub_id(uuid::Uuid::new_v4().to_string())
++            .new_default_turn_with_sub_id_and_origin(
++                uuid::Uuid::new_v4().to_string(),
++                automatic_turn_origin,
++            )
+             .await;
+         if turn_context.mode == ModeKind::Plan {
+             self.clear_reserved_idle_turn(&turn_state).await;
+@@ -118,11 +209,15 @@ impl Session {
+             ));
+         }
+ 
++        let mut pending_input = Vec::with_capacity(display_items.len() + input.len());
++        pending_input.extend(
++            display_items
++                .into_iter()
++                .map(|item| TurnInput::DisplayItem(Box::new(item))),
++        );
++        pending_input.extend(input.into_iter().map(TurnInput::ResponseItem));
+         self.input_queue
+-            .extend_pending_input_for_turn_state(
+-                turn_state.as_ref(),
+-                input.into_iter().map(TurnInput::ResponseItem).collect(),
+-            )
++            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_input)
+             .await;
+         self.start_task(turn_context, Vec::new(), RegularTask::new())
+             .await;
+diff --git a/codex-rs/core/src/session/input_queue.rs b/codex-rs/core/src/session/input_queue.rs
+index 3992f44d4af9d397ad9daf228e0213c4642e82cd..c58c7069c61b9cff8e8b2af2c13a4b93d9eb962d 100644
+--- a/codex-rs/core/src/session/input_queue.rs
++++ b/codex-rs/core/src/session/input_queue.rs
+@@ -1,6 +1,7 @@
+ use crate::state::ActiveTurn;
+ use crate::state::MailboxDeliveryPhase;
+ use crate::state::TurnState;
++use codex_protocol::items::TurnItem;
+ use codex_protocol::models::ResponseItem;
+ use codex_protocol::protocol::InterAgentCommunication;
+ use codex_protocol::user_input::UserInput;
+@@ -9,12 +10,13 @@ use std::sync::Arc;
+ use tokio::sync::Mutex;
+ use tokio::sync::watch;
+ 
+-#[derive(Clone, Debug, PartialEq)]
++#[derive(Clone, Debug)]
+ pub(crate) enum TurnInput {
+     UserInput {
+         content: Vec<UserInput>,
+         client_id: Option<String>,
+     },
++    DisplayItem(Box<TurnItem>),
+     ResponseItem(ResponseItem),
+     InterAgentCommunication(InterAgentCommunication),
+ }
+@@ -394,13 +396,16 @@ mod tests {
+             .enqueue_mailbox_communication(mail_two.clone())
+             .await;
+ 
+-        assert_eq!(
+-            input_queue.drain_mailbox_input_items().await,
+-            vec![
+-                TurnInput::InterAgentCommunication(mail_one),
+-                TurnInput::InterAgentCommunication(mail_two)
+-            ]
+-        );
++        let input = input_queue.drain_mailbox_input_items().await;
++        let [
++            TurnInput::InterAgentCommunication(actual_mail_one),
++            TurnInput::InterAgentCommunication(actual_mail_two),
++        ] = input.as_slice()
++        else {
++            panic!("expected two mailbox communications");
++        };
++        assert_eq!(actual_mail_one, &mail_one);
++        assert_eq!(actual_mail_two, &mail_two);
+         assert!(!input_queue.has_pending_mailbox_items().await);
+     }
+ 
+diff --git a/codex-rs/core/src/session/review.rs b/codex-rs/core/src/session/review.rs
+index 9a89c1beeb5c79c35fd2cc05736e3a510c48fd00..80cdd80ba6a3f650e4cb9329e4df831c4251d0ec 100644
+--- a/codex-rs/core/src/session/review.rs
++++ b/codex-rs/core/src/session/review.rs
+@@ -123,6 +123,7 @@ pub(super) async fn spawn_review_thread(
+         history_mode: parent_turn_context.history_mode,
+         parent_thread_id: parent_turn_context.parent_thread_id,
+         originator: parent_turn_context.originator.clone(),
++        automatic_turn_origin: parent_turn_context.automatic_turn_origin.clone(),
+         environments: parent_turn_context.environments.clone(),
+         available_models,
+         unified_exec_shell_mode,
 diff --git a/codex-rs/core/src/session/session.rs b/codex-rs/core/src/session/session.rs
-index 910ade583bd94917fa4b784e0ab8b15eae0e688b..4261b0d71ffd402631b00aa381fd5cc74d921468 100644
+index 910ade583bd94917fa4b784e0ab8b15eae0e688b..fa909eef4b08f85f9a71ad6376dd9498114be4ae 100644
 --- a/codex-rs/core/src/session/session.rs
 +++ b/codex-rs/core/src/session/session.rs
-@@ -46,6 +46,8 @@ pub(crate) struct Session {
+@@ -46,6 +46,9 @@ pub(crate) struct Session {
      pub(crate) services: SessionServices,
      pub(super) git_enrichment_policy: GitEnrichmentPolicy,
      pub(super) next_internal_sub_id: AtomicU64,
 +    pub(crate) idle_epoch: AtomicU64,
-+    pub(crate) last_completed_turn_id: Mutex<Option<String>>,
++    pub(crate) last_completed_turn:
++        Mutex<Option<(String, codex_extension_api::AutomaticTurnOrigin)>>,
  }
  
  #[derive(Clone)]
-@@ -472,6 +474,11 @@ impl Session {
+@@ -472,6 +475,11 @@ impl Session {
          state.session_configuration.originator.clone()
      }
  
@@ -387,41 +1639,191 @@ index 910ade583bd94917fa4b784e0ab8b15eae0e688b..4261b0d71ffd402631b00aa381fd5cc7
      #[instrument(name = "session_init", level = "info", skip_all)]
      #[allow(clippy::too_many_arguments)]
      pub(crate) async fn new(
-@@ -1153,6 +1160,8 @@ impl Session {
+@@ -1153,6 +1161,8 @@ impl Session {
                  services,
                  git_enrichment_policy,
                  next_internal_sub_id: AtomicU64::new(0),
 +                idle_epoch: AtomicU64::new(0),
-+                last_completed_turn_id: Mutex::new(None),
++                last_completed_turn: Mutex::new(None),
              });
              if let Some(network_policy_decider_session) = network_policy_decider_session {
                  let mut guard = network_policy_decider_session.write().await;
 diff --git a/codex-rs/core/src/session/tests.rs b/codex-rs/core/src/session/tests.rs
-index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..70559453478f1274a8e9c796dfb1ea19ffe4d472 100644
+index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9eba3023e2 100644
 --- a/codex-rs/core/src/session/tests.rs
 +++ b/codex-rs/core/src/session/tests.rs
-@@ -5538,6 +5538,8 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
+@@ -33,6 +33,9 @@ use codex_config::types::ToolSuggestDisabledTool;
+ use codex_core_skills::HostSkillsSnapshot;
+ use core_test_support::test_codex::local_selections;
+ 
++use codex_extension_api::AutomaticTurnOrigin;
++use codex_extension_items::ExtensionItem;
++use codex_extension_items::shadow::ShadowReportItem;
+ use codex_features::Feature;
+ use codex_http_client::HttpClientFactory;
+ use codex_http_client::OutboundProxyPolicy;
+@@ -227,6 +230,43 @@ fn user_message(text: &str) -> ResponseItem {
+     }
+ }
+ 
++fn shadow_report_turn_item(id: &str) -> TurnItem {
++    TurnItem::Extension(ExtensionItem::ShadowReport(ShadowReportItem {
++        id: id.to_owned(),
++        shadow_id: "reviewer".to_owned(),
++        shadow_name: "Reviewer".to_owned(),
++        content: "report".to_owned(),
++    }))
++}
++
++fn shadow_report_turn_item_matches(actual: &TurnItem, expected: &TurnItem) -> bool {
++    match (actual, expected) {
++        (
++            TurnItem::Extension(ExtensionItem::ShadowReport(actual)),
++            TurnItem::Extension(ExtensionItem::ShadowReport(expected)),
++        ) => actual == expected,
++        _ => false,
++    }
++}
++
++fn drain_contains_item_lifecycle(
++    rx: &async_channel::Receiver<Event>,
++    expected_item: &TurnItem,
++) -> bool {
++    let mut found = false;
++    while let Ok(event) = rx.try_recv() {
++        if matches!(
++            event.msg,
++            EventMsg::ItemStarted(ItemStartedEvent { item, .. })
++                | EventMsg::ItemCompleted(ItemCompletedEvent { item, .. })
++                if shadow_report_turn_item_matches(&item, expected_item)
++        ) {
++            found = true;
++        }
++    }
++    found
++}
++
+ #[test]
+ fn assign_missing_response_item_ids_assigns_agent_message_ids() {
+     let items = Cow::Owned(vec![
+@@ -5538,6 +5578,8 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
          services,
          git_enrichment_policy: GitEnrichmentPolicy::Fresh,
          next_internal_sub_id: AtomicU64::new(0),
 +        idle_epoch: AtomicU64::new(0),
-+        last_completed_turn_id: Mutex::new(None),
++        last_completed_turn: Mutex::new(None),
      };
  
      (session, turn_context)
-@@ -7700,6 +7702,8 @@ where
+@@ -7700,6 +7742,8 @@ where
          services,
          git_enrichment_policy: GitEnrichmentPolicy::Fresh,
          next_internal_sub_id: AtomicU64::new(0),
 +        idle_epoch: AtomicU64::new(0),
-+        last_completed_turn_id: Mutex::new(None),
++        last_completed_turn: Mutex::new(None),
      });
  
      (session, turn_context, rx_event)
-@@ -10028,6 +10032,55 @@ async fn try_start_turn_if_idle_rejects_active_review_turn_without_injecting() {
+@@ -9919,7 +9963,7 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
+ 
+ #[tokio::test]
+ async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
+-    let (sess, tc, _rx) = make_session_and_context_with_rx().await;
++    let (sess, tc, rx) = make_session_and_context_with_rx().await;
+     sess.spawn_task(
+         Arc::clone(&tc),
+         Vec::new(),
+@@ -9931,17 +9975,26 @@ async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
+     .await;
+ 
+     let item = user_message("synthetic idle input");
++    let display_item = shadow_report_turn_item("shadow-busy");
+     let err = sess
+-        .try_start_turn_if_idle(vec![item.clone()])
++        .try_start_turn_if_idle_for_epoch_with_origin(
++            sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire),
++            AutomaticTurnOrigin::Extension("shadow".to_owned()),
++            vec![display_item.clone()],
++            vec![item.clone()],
++        )
+         .await
+         .expect_err("active turn should reject idle-only input");
+ 
+     assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, err.reason());
+     assert_eq!(vec![item], err.into_input());
+-    assert_eq!(
+-        Vec::<TurnInput>::new(),
+-        sess.input_queue.get_pending_input(&sess.active_turn).await
++    assert!(
++        sess.input_queue
++            .get_pending_input(&sess.active_turn)
++            .await
++            .is_empty()
+     );
++    assert!(!drain_contains_item_lifecycle(&rx, &display_item));
+ 
      sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
  }
+@@ -9965,15 +10018,17 @@ async fn try_start_turn_if_idle_rejects_plan_mode_without_injecting() {
+     assert_eq!(TryStartTurnIfIdleRejectionReason::PlanMode, err.reason());
+     assert_eq!(vec![item], err.into_input());
+     assert!(sess.active_turn.lock().await.is_none());
+-    assert_eq!(
+-        Vec::<TurnInput>::new(),
+-        sess.input_queue.get_pending_input(&sess.active_turn).await
++    assert!(
++        sess.input_queue
++            .get_pending_input(&sess.active_turn)
++            .await
++            .is_empty()
+     );
+ }
  
+ #[tokio::test]
+ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting() {
+-    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
++    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
+     sess.input_queue
+         .enqueue_mailbox_communication(InterAgentCommunication::new(
+             AgentPath::root(),
+@@ -9985,8 +10040,14 @@ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting()
+         .await;
+ 
+     let item = user_message("synthetic idle input");
++    let display_item = shadow_report_turn_item("shadow-pending");
+     let err = sess
+-        .try_start_turn_if_idle(vec![item.clone()])
++        .try_start_turn_if_idle_for_epoch_with_origin(
++            sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire),
++            AutomaticTurnOrigin::Extension("shadow".to_owned()),
++            vec![display_item.clone()],
++            vec![item.clone()],
++        )
+         .await
+         .expect_err("pending trigger-turn mail should reject automatic idle input");
+ 
+@@ -9997,6 +10058,7 @@ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting()
+     assert_eq!(vec![item], err.into_input());
+     assert!(sess.active_turn.lock().await.is_none());
+     assert!(sess.input_queue.has_trigger_turn_mailbox_items().await);
++    assert!(!drain_contains_item_lifecycle(&rx, &display_item));
+ }
+ 
+ #[tokio::test]
+@@ -10020,14 +10082,143 @@ async fn try_start_turn_if_idle_rejects_active_review_turn_without_injecting() {
+ 
+     assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, err.reason());
+     assert_eq!(vec![item], err.into_input());
++    assert!(
++        sess.input_queue
++            .get_pending_input(&sess.active_turn)
++            .await
++            .is_empty()
++    );
++
++    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
++}
++
 +#[tokio::test]
 +async fn inject_if_running_for_turn_rejects_mismatch_and_accepts_match() {
 +    let (sess, tc, _rx) = make_session_and_context_with_rx().await;
@@ -436,30 +1838,38 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..70559453478f1274a8e9c796dfb1ea19
 +    .await;
 +
 +    let item = user_message("shadow report");
-+    assert_eq!(
+     assert_eq!(
+-        Vec::<TurnInput>::new(),
+-        sess.input_queue.get_pending_input(&sess.active_turn).await
 +        Err(vec![item.clone()]),
 +        sess.inject_if_running_for_turn("wrong-turn", vec![item.clone()])
 +            .await
-+    );
+     );
 +    assert!(
 +        sess.inject_if_running_for_turn(&tc.sub_id, vec![item])
 +            .await
 +            .is_ok()
 +    );
 +    assert!(sess.input_queue.has_pending_input(&sess.active_turn).await);
-+
-+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
-+}
-+
+ 
+     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+ }
+ 
 +#[tokio::test]
 +async fn try_start_turn_if_idle_for_epoch_rejects_stale_epoch() {
-+    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
++    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
 +    sess.idle_epoch
 +        .store(2, std::sync::atomic::Ordering::Release);
 +    let item = user_message("stale shadow report");
++    let display_item = shadow_report_turn_item("shadow-stale");
 +
 +    let err = sess
-+        .try_start_turn_if_idle_for_epoch(1, vec![item.clone()])
++        .try_start_turn_if_idle_for_epoch_with_origin(
++            1,
++            AutomaticTurnOrigin::Extension("shadow".to_owned()),
++            vec![display_item.clone()],
++            vec![item.clone()],
++        )
 +        .await
 +        .expect_err("stale idle epoch should reject automatic input");
 +
@@ -469,16 +1879,357 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..70559453478f1274a8e9c796dfb1ea19
 +    );
 +    assert_eq!(vec![item], err.into_input());
 +    assert!(sess.active_turn.lock().await.is_none());
++    assert!(!drain_contains_item_lifecycle(&rx, &display_item));
++}
++
++#[tokio::test]
++async fn try_start_turn_if_idle_with_origin_orders_shadow_item_and_rejects_duplicate() {
++    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
++    let display_item = shadow_report_turn_item("shadow-accepted");
++    let model_item = user_message("accepted shadow report");
++    let idle_epoch = sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire);
++
++    sess.try_start_turn_if_idle_for_epoch_with_origin(
++        idle_epoch,
++        AutomaticTurnOrigin::Extension("shadow".to_owned()),
++        vec![display_item.clone()],
++        vec![model_item.clone()],
++    )
++    .await
++    .expect("idle Shadow delivery should start");
++
++    let active_origin = sess
++        .active_turn
++        .lock()
++        .await
++        .as_ref()
++        .and_then(|active_turn| active_turn.task.as_ref())
++        .map(|task| task.turn_context.automatic_turn_origin.clone());
++    assert_eq!(
++        active_origin,
++        Some(AutomaticTurnOrigin::Extension("shadow".to_owned()))
++    );
++
++    let duplicate = sess
++        .try_start_turn_if_idle_for_epoch_with_origin(
++            sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire),
++            AutomaticTurnOrigin::Extension("shadow".to_owned()),
++            vec![display_item.clone()],
++            vec![model_item],
++        )
++        .await
++        .expect_err("active Shadow follow-up should reject duplicate delivery");
++    assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, duplicate.reason());
++
++    let lifecycle = timeout(StdDuration::from_secs(2), async {
++        let mut lifecycle = Vec::new();
++        while lifecycle.len() < 3 {
++            let event = rx.recv().await.expect("event channel open");
++            match event.msg {
++                EventMsg::TurnStarted(_) => lifecycle.push("turnStarted"),
++                EventMsg::ItemStarted(ItemStartedEvent { item, .. })
++                    if shadow_report_turn_item_matches(&item, &display_item) =>
++                {
++                    lifecycle.push("itemStarted");
++                }
++                EventMsg::ItemCompleted(ItemCompletedEvent { item, .. })
++                    if shadow_report_turn_item_matches(&item, &display_item) =>
++                {
++                    lifecycle.push("itemCompleted");
++                }
++                _ => {}
++            }
++        }
++        lifecycle
++    })
++    .await
++    .expect("Shadow item lifecycle should be emitted");
++    assert_eq!(
++        lifecycle,
++        vec!["turnStarted", "itemStarted", "itemCompleted"]
++    );
++
++    assert!(!drain_contains_item_lifecycle(&rx, &display_item));
++    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 +}
 +
  #[tokio::test]
  async fn steer_input_requires_active_turn() {
      let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
+@@ -10208,12 +10399,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
+     sess.abort_all_tasks(TurnAbortReason::Replaced).await;
+ 
+     assert!(sess.active_turn.lock().await.is_none());
+-    assert_eq!(
+-        sess.input_queue
+-            .take_pending_input_for_turn_state(turn_state.as_ref())
+-            .await,
+-        vec![TurnInput::ResponseItem(pending_item)]
+-    );
++    let pending_input = sess
++        .input_queue
++        .take_pending_input_for_turn_state(turn_state.as_ref())
++        .await;
++    let [TurnInput::ResponseItem(actual_pending_item)] = pending_input.as_slice() else {
++        panic!("expected one pending response item");
++    };
++    assert_eq!(actual_pending_item, &pending_item);
+ }
+ 
+ async fn set_total_token_usage(sess: &Session, total_token_usage: TokenUsage) {
+@@ -10256,17 +10449,21 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
+         !sess.input_queue.has_pending_input(&sess.active_turn).await,
+         "queue-only mailbox mail should stay buffered once the current turn emitted its answer"
+     );
+-    assert_eq!(
+-        sess.input_queue.get_pending_input(&sess.active_turn).await,
+-        Vec::new()
++    assert!(
++        sess.input_queue
++            .get_pending_input(&sess.active_turn)
++            .await
++            .is_empty()
+     );
+ 
+     sess.abort_all_tasks(TurnAbortReason::Replaced).await;
+ 
+-    assert_eq!(
+-        sess.input_queue.get_pending_input(&sess.active_turn).await,
+-        vec![TurnInput::InterAgentCommunication(communication)],
+-    );
++    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
++    let [TurnInput::InterAgentCommunication(actual_communication)] = pending_input.as_slice()
++    else {
++        panic!("expected one pending mailbox communication");
++    };
++    assert_eq!(actual_communication, &communication);
+ }
+ 
+ #[tokio::test]
+@@ -10344,19 +10541,23 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
+     .await
+     .expect("steered input should be accepted");
+ 
++    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
++    let [
++        TurnInput::UserInput { content, client_id },
++        TurnInput::InterAgentCommunication(actual_communication),
++    ] = pending_input.as_slice()
++    else {
++        panic!("expected steered input followed by mailbox communication");
++    };
+     assert_eq!(
+-        sess.input_queue.get_pending_input(&sess.active_turn).await,
+-        vec![
+-            TurnInput::UserInput {
+-                content: vec![UserInput::Text {
+-                    text: "follow up".to_string(),
+-                    text_elements: Vec::new(),
+-                }],
+-                client_id: None
+-            },
+-            TurnInput::InterAgentCommunication(communication),
+-        ],
++        content,
++        &[UserInput::Text {
++            text: "follow up".to_string(),
++            text_elements: Vec::new(),
++        }]
+     );
++    assert_eq!(client_id, &None);
++    assert_eq!(actual_communication, &communication);
+ }
+ 
+ #[tokio::test]
+@@ -10402,19 +10603,23 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
+         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
+         .await;
+ 
++    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
++    let [
++        TurnInput::UserInput { content, client_id },
++        TurnInput::InterAgentCommunication(actual_communication),
++    ] = pending_input.as_slice()
++    else {
++        panic!("expected steered input followed by mailbox communication");
++    };
+     assert_eq!(
+-        sess.input_queue.get_pending_input(&sess.active_turn).await,
+-        vec![
+-            TurnInput::UserInput {
+-                content: vec![UserInput::Text {
+-                    text: "follow up".to_string(),
+-                    text_elements: Vec::new(),
+-                }],
+-                client_id: None
+-            },
+-            TurnInput::InterAgentCommunication(communication),
+-        ],
++        content,
++        &[UserInput::Text {
++            text: "follow up".to_string(),
++            text_elements: Vec::new(),
++        }]
+     );
++    assert_eq!(client_id, &None);
++    assert_eq!(actual_communication, &communication);
+ }
+ 
+ #[tokio::test]
+@@ -10466,10 +10671,12 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
+ 
+     assert!(output.needs_follow_up);
+     assert!(output.tool_future.is_some());
+-    assert_eq!(
+-        sess.input_queue.get_pending_input(&sess.active_turn).await,
+-        vec![TurnInput::InterAgentCommunication(communication)],
+-    );
++    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
++    let [TurnInput::InterAgentCommunication(actual_communication)] = pending_input.as_slice()
++    else {
++        panic!("expected one pending mailbox communication");
++    };
++    assert_eq!(actual_communication, &communication);
+ }
+ 
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+diff --git a/codex-rs/core/src/session/turn.rs b/codex-rs/core/src/session/turn.rs
+index 63ccba77235a160c3f43e5ccf3bce7e99ad02b31..a26c3bbe338cd1eae368f1bf38266ccc24eb562d 100644
+--- a/codex-rs/core/src/session/turn.rs
++++ b/codex-rs/core/src/session/turn.rs
+@@ -553,7 +553,9 @@ async fn build_skills_and_plugins(
+         .iter()
+         .filter_map(|item| match item {
+             TurnInput::UserInput { content, .. } => Some(content.as_slice()),
+-            TurnInput::ResponseItem(_) | TurnInput::InterAgentCommunication(_) => None,
++            TurnInput::DisplayItem(_)
++            | TurnInput::ResponseItem(_)
++            | TurnInput::InterAgentCommunication(_) => None,
+         })
+         .flatten()
+         .cloned()
+@@ -790,7 +792,9 @@ async fn track_turn_resolved_config_analytics(
+                 .iter()
+                 .filter_map(|item| match item {
+                     TurnInput::UserInput { content, .. } => Some(content.as_slice()),
+-                    TurnInput::ResponseItem(_) | TurnInput::InterAgentCommunication(_) => None,
++                    TurnInput::DisplayItem(_)
++                    | TurnInput::ResponseItem(_)
++                    | TurnInput::InterAgentCommunication(_) => None,
+                 })
+                 .flatten()
+                 .filter(|item| {
+diff --git a/codex-rs/core/src/session/turn_context.rs b/codex-rs/core/src/session/turn_context.rs
+index a30a4535407277dec98ec2ddfa035f74cf9cb3a1..c0001f87625715750b8dc458c7d8a50607fa2ad6 100644
+--- a/codex-rs/core/src/session/turn_context.rs
++++ b/codex-rs/core/src/session/turn_context.rs
+@@ -2,6 +2,7 @@ use super::*;
+ use crate::environment_selection::TurnEnvironmentSnapshot;
+ use crate::shell_snapshot::ShellSnapshotFile;
+ use codex_core_skills::HostSkillsSnapshot;
++use codex_extension_api::AutomaticTurnOrigin;
+ use codex_file_system::FileSystemSandboxContext;
+ use codex_model_provider::SharedModelProvider;
+ use codex_model_provider::create_model_provider;
+@@ -125,6 +126,7 @@ pub struct TurnContext {
+     pub(crate) history_mode: ThreadHistoryMode,
+     pub(crate) parent_thread_id: Option<ThreadId>,
+     pub(crate) originator: String,
++    pub(crate) automatic_turn_origin: AutomaticTurnOrigin,
+     pub(crate) environments: TurnEnvironmentSnapshot,
+     /// The session's absolute working directory. All relative paths provided
+     /// by the model as well as sandbox policies are resolved against this path
+@@ -283,6 +285,7 @@ impl TurnContext {
+             history_mode: self.history_mode,
+             parent_thread_id: self.parent_thread_id,
+             originator: self.originator.clone(),
++            automatic_turn_origin: self.automatic_turn_origin.clone(),
+             environments: self.environments.clone(),
+             #[allow(deprecated)]
+             cwd: self.cwd.clone(),
+@@ -561,6 +564,7 @@ impl Session {
+             history_mode: session_configuration.history_mode,
+             parent_thread_id: session_configuration.parent_thread_id,
+             originator: session_configuration.originator.clone(),
++            automatic_turn_origin: AutomaticTurnOrigin::Unspecified,
+             environments,
+             #[allow(deprecated)]
+             cwd,
+@@ -658,6 +662,7 @@ impl Session {
+                 sub_id,
+                 session_configuration,
+                 updates.final_output_json_schema,
++                AutomaticTurnOrigin::Unspecified,
+             )
+             .await)
+     }
+@@ -667,11 +672,13 @@ impl Session {
+         sub_id: String,
+         session_configuration: SessionConfiguration,
+         final_output_json_schema: Option<Option<Value>>,
++        automatic_turn_origin: AutomaticTurnOrigin,
+     ) -> Arc<TurnContext> {
+         self.new_turn_context_from_configuration(
+             sub_id,
+             session_configuration,
+             final_output_json_schema,
++            automatic_turn_origin,
+             TurnMultiAgentRuntime::ResolveAndStore,
+             self.git_enrichment_policy,
+         )
+@@ -687,6 +694,7 @@ impl Session {
+             sub_id,
+             session_configuration,
+             /*final_output_json_schema*/ None,
++            AutomaticTurnOrigin::Unspecified,
+             TurnMultiAgentRuntime::Preview,
+             GitEnrichmentPolicy::Skip,
+         )
+@@ -699,6 +707,7 @@ impl Session {
+         sub_id: String,
+         session_configuration: SessionConfiguration,
+         final_output_json_schema: Option<Option<Value>>,
++        automatic_turn_origin: AutomaticTurnOrigin,
+         multi_agent_runtime: TurnMultiAgentRuntime,
+         git_enrichment_policy: GitEnrichmentPolicy,
+     ) -> Arc<TurnContext> {
+@@ -789,6 +798,7 @@ impl Session {
+             sub_id,
+             skills_snapshot,
+         );
++        turn_context.automatic_turn_origin = automatic_turn_origin;
+         turn_context.realtime_active = self.conversation.running_state().await.is_some();
+ 
+         if let Some(final_schema) = final_output_json_schema {
+@@ -839,6 +849,22 @@ impl Session {
+             sub_id,
+             session_configuration,
+             /*final_output_json_schema*/ None,
++            AutomaticTurnOrigin::Unspecified,
++        )
++        .await
++    }
++
++    pub(crate) async fn new_default_turn_with_sub_id_and_origin(
++        &self,
++        sub_id: String,
++        automatic_turn_origin: AutomaticTurnOrigin,
++    ) -> Arc<TurnContext> {
++        let session_configuration = self.default_turn_configuration().await;
++        self.new_turn_from_configuration(
++            sub_id,
++            session_configuration,
++            /*final_output_json_schema*/ None,
++            automatic_turn_origin,
+         )
+         .await
+     }
 diff --git a/codex-rs/core/src/tasks/lifecycle.rs b/codex-rs/core/src/tasks/lifecycle.rs
-index 789955df1321c8941bb80979f472dbef7492ba23..18d9dad4b8199df128b6a0c4cd83c00e7b000ccc 100644
+index 789955df1321c8941bb80979f472dbef7492ba23..40d8721b5071aa62abd8f87e3601886551af2d0a 100644
 --- a/codex-rs/core/src/tasks/lifecycle.rs
 +++ b/codex-rs/core/src/tasks/lifecycle.rs
-@@ -2,6 +2,7 @@ use codex_extension_api::ExtensionData;
+@@ -1,7 +1,7 @@
+-use codex_extension_api::ExtensionData;
  use codex_protocol::protocol::CodexErrorInfo;
  use codex_protocol::protocol::TokenUsage;
  use codex_protocol::protocol::TurnAbortReason;
@@ -486,7 +2237,7 @@ index 789955df1321c8941bb80979f472dbef7492ba23..18d9dad4b8199df128b6a0c4cd83c00e
  
  use crate::session::session::Session;
  use crate::session::turn_context::TurnContext;
-@@ -12,6 +13,7 @@ impl Session {
+@@ -12,6 +12,7 @@ impl Session {
          turn_context: &TurnContext,
          token_usage_at_turn_start: &TokenUsage,
      ) {
@@ -494,38 +2245,108 @@ index 789955df1321c8941bb80979f472dbef7492ba23..18d9dad4b8199df128b6a0c4cd83c00e
          let collaboration_mode = turn_context.collaboration_mode();
          for contributor in self.services.extensions.turn_lifecycle_contributors() {
              contributor
-@@ -28,6 +30,7 @@ impl Session {
+@@ -27,7 +28,12 @@ impl Session {
+         }
      }
  
-     pub(super) async fn emit_turn_stop_lifecycle(&self, turn_store: &ExtensionData) {
-+        *self.last_completed_turn_id.lock().await = Some(turn_store.level_id().to_owned());
+-    pub(super) async fn emit_turn_stop_lifecycle(&self, turn_store: &ExtensionData) {
++    pub(super) async fn emit_turn_stop_lifecycle(&self, turn_context: &TurnContext) {
++        *self.last_completed_turn.lock().await = Some((
++            turn_context.sub_id.clone(),
++            turn_context.automatic_turn_origin.clone(),
++        ));
++        let turn_store = turn_context.extension_data.as_ref();
          for contributor in self.services.extensions.turn_lifecycle_contributors() {
              contributor
                  .on_turn_stop(codex_extension_api::TurnStopInput {
-@@ -46,9 +49,15 @@ impl Session {
+@@ -46,9 +52,16 @@ impl Session {
              return;
          }
  
-+        let completed_turn_id = self.last_completed_turn_id.lock().await.clone();
++        let completed_turn = self.last_completed_turn.lock().await.clone();
 +        let idle_epoch = self.idle_epoch.load(Ordering::Acquire);
 +        let trajectory = self.extension_conversation_history().await;
          for contributor in self.services.extensions.thread_lifecycle_contributors() {
              contributor
                  .on_thread_idle(codex_extension_api::ThreadIdleInput {
-+                    completed_turn_id: completed_turn_id.as_deref(),
++                    completed_turn_id: completed_turn.as_ref().map(|(id, _)| id.as_str()),
++                    completed_turn_origin: completed_turn.as_ref().map(|(_, origin)| origin),
 +                    idle_epoch,
 +                    trajectory: trajectory.clone(),
                      session_store: &self.services.session_extension_data,
                      thread_store: &self.services.thread_extension_data,
                  })
-@@ -61,6 +70,7 @@ impl Session {
+@@ -59,8 +72,13 @@ impl Session {
+     pub(super) async fn emit_turn_abort_lifecycle(
+         &self,
          reason: TurnAbortReason,
-         turn_store: &ExtensionData,
+-        turn_store: &ExtensionData,
++        turn_context: &TurnContext,
      ) {
-+        *self.last_completed_turn_id.lock().await = Some(turn_store.level_id().to_owned());
++        *self.last_completed_turn.lock().await = Some((
++            turn_context.sub_id.clone(),
++            turn_context.automatic_turn_origin.clone(),
++        ));
++        let turn_store = turn_context.extension_data.as_ref();
          for contributor in self.services.extensions.turn_lifecycle_contributors() {
              contributor
                  .on_turn_abort(codex_extension_api::TurnAbortInput {
+diff --git a/codex-rs/core/src/tasks/mod.rs b/codex-rs/core/src/tasks/mod.rs
+index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..106edeb5bba1dce8f3c99fd0a0b7f10130e69638 100644
+--- a/codex-rs/core/src/tasks/mod.rs
++++ b/codex-rs/core/src/tasks/mod.rs
+@@ -511,7 +511,7 @@ impl Session {
+         }
+ 
+         if let Some(turn_context) = turn_context.as_deref() {
+-            self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
++            self.emit_turn_abort_lifecycle(reason.clone(), turn_context)
+                 .await;
+         }
+         if let Some(active_turn) = active_turn_to_clear {
+@@ -551,7 +551,7 @@ impl Session {
+             self.handle_task_abort(task, reason.clone()).await;
+         }
+         if let Some(turn_context) = turn_context.as_deref() {
+-            self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
++            self.emit_turn_abort_lifecycle(reason.clone(), turn_context)
+                 .await;
+         }
+         // Let interrupted tasks observe cancellation before dropping pending approvals, or an
+@@ -769,7 +769,7 @@ impl Session {
+                 profile: turn_context.turn_timing_state.complete_profile(),
+             });
+         let event = if let Some(reason) = abort_reason {
+-            self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
++            self.emit_turn_abort_lifecycle(reason.clone(), turn_context.as_ref())
+                 .await;
+             EventMsg::TurnAborted(TurnAbortedEvent {
+                 turn_id: Some(turn_context.sub_id.clone()),
+@@ -784,8 +784,7 @@ impl Session {
+                 .time_to_first_token_ms()
+                 .await;
+             let error = turn_context.terminal_error.lock().await.clone();
+-            self.emit_turn_stop_lifecycle(turn_context.extension_data.as_ref())
+-                .await;
++            self.emit_turn_stop_lifecycle(turn_context.as_ref()).await;
+             EventMsg::TurnComplete(TurnCompleteEvent {
+                 turn_id: turn_context.sub_id.clone(),
+                 last_agent_message,
+diff --git a/codex-rs/core/src/tasks/review.rs b/codex-rs/core/src/tasks/review.rs
+index 0e2e2712e0be09a2314b8d63751043b2cd13234a..5eefb31d82bac496d2dccd734fa337e996db99f1 100644
+--- a/codex-rs/core/src/tasks/review.rs
++++ b/codex-rs/core/src/tasks/review.rs
+@@ -67,7 +67,9 @@ impl SessionTask for ReviewTask {
+         for item in input {
+             match item {
+                 TurnInput::UserInput { mut content, .. } => user_input.append(&mut content),
+-                TurnInput::ResponseItem(_) | TurnInput::InterAgentCommunication(_) => {}
++                TurnInput::DisplayItem(_)
++                | TurnInput::ResponseItem(_)
++                | TurnInput::InterAgentCommunication(_) => {}
+             }
+         }
+ 
 diff --git a/codex-rs/core/src/thread_manager.rs b/codex-rs/core/src/thread_manager.rs
 index 3a4b876dc39177371e279e81236de40d68b6c936..f5fda86e3758f4d95dd59c654a47c72277485c07 100644
 --- a/codex-rs/core/src/thread_manager.rs
@@ -563,6 +2384,74 @@ index 3a4b876dc39177371e279e81236de40d68b6c936..f5fda86e3758f4d95dd59c654a47c722
          self.start_thread_inner(options, Some(forked_from_thread_id))
              .await
      }
+diff --git a/codex-rs/ext/extension-api/src/contributors.rs b/codex-rs/ext/extension-api/src/contributors.rs
+index a58605e952ab159a78b3be42c17b3ecee31e3813..4bdf3d02a2aea248c73bf24e48d0101a38df8c90 100644
+--- a/codex-rs/ext/extension-api/src/contributors.rs
++++ b/codex-rs/ext/extension-api/src/contributors.rs
+@@ -28,6 +28,7 @@ pub use prompt::PromptFragment;
+ pub use prompt::PromptSlot;
+ pub use skill_invocation::SkillInvocationInput;
+ pub use skill_invocation::SkillInvocationKind;
++pub use thread_lifecycle::AutomaticTurnOrigin;
+ pub use thread_lifecycle::ThreadIdleInput;
+ pub use thread_lifecycle::ThreadOriginator;
+ pub use thread_lifecycle::ThreadResumeInput;
+diff --git a/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs b/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs
+index 4fa6e6721c4f96934537df16883c348fd61dcc18..cd9180ffdbe4f57a8a2dc253b7c801a3afe8cafb 100644
+--- a/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs
++++ b/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs
+@@ -4,6 +4,7 @@ use crate::ExtensionData;
+ use codex_mcp::McpResourceClient;
+ use codex_protocol::protocol::SessionSource;
+ use codex_protocol::protocol::TurnEnvironmentSelection;
++use codex_tools::ConversationHistory;
+ 
+ /// Trusted, host-resolved billing attribution for a thread.
+ ///
+@@ -39,8 +40,31 @@ pub struct ThreadResumeInput<'a> {
+     pub thread_store: &'a ExtensionData,
+ }
+ 
++/// Trusted origin metadata for a host-started automatic turn.
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub enum AutomaticTurnOrigin {
++    /// A turn without an extension-specific origin.
++    Unspecified,
++    /// A turn started by the named extension.
++    Extension(String),
++}
++
++impl AutomaticTurnOrigin {
++    pub fn is_extension(&self, name: &str) -> bool {
++        matches!(self, Self::Extension(origin) if origin == name)
++    }
++}
++
+ /// Input supplied when the host has no immediately pending thread work.
+ pub struct ThreadIdleInput<'a> {
++    /// The main turn whose completion produced this idle edge.
++    pub completed_turn_id: Option<&'a str>,
++    /// Trusted origin of the completed turn, when it was host-started automatically.
++    pub completed_turn_origin: Option<&'a AutomaticTurnOrigin>,
++    /// Monotonic host epoch. Starting any new main turn invalidates old epochs.
++    pub idle_epoch: u64,
++    /// Host-owned raw history snapshot for extensions that need bounded context.
++    pub trajectory: ConversationHistory,
+     /// Store scoped to the host session runtime.
+     pub session_store: &'a ExtensionData,
+     /// Store scoped to this thread runtime.
+diff --git a/codex-rs/ext/extension-api/src/lib.rs b/codex-rs/ext/extension-api/src/lib.rs
+index 0c7ddce86df25cc312e6fdaa5ea5d4bc51e4c0c0..c33eed4e58fcb2617ba9804d5686b5f3d06ac378 100644
+--- a/codex-rs/ext/extension-api/src/lib.rs
++++ b/codex-rs/ext/extension-api/src/lib.rs
+@@ -32,6 +32,7 @@ pub use codex_tools::TurnItemEmitter;
+ pub use codex_tools::parse_tool_input_schema;
+ pub use codex_tools::parse_tool_input_schema_without_compaction;
+ pub use contributors::ApprovalReviewContributor;
++pub use contributors::AutomaticTurnOrigin;
+ pub use contributors::ConfigContributor;
+ pub use contributors::ContextContributor;
+ pub use contributors::ExtensionFuture;
 diff --git a/codex-rs/ext/goal/src/runtime.rs b/codex-rs/ext/goal/src/runtime.rs
 index 31b8b2eb8ed298b1862f3583370ba76c19680e3e..f66cf33147d10ece11e7f30441e5ad33d470fb1b 100644
 --- a/codex-rs/ext/goal/src/runtime.rs
@@ -585,31 +2474,102 @@ index 31b8b2eb8ed298b1862f3583370ba76c19680e3e..f66cf33147d10ece11e7f30441e5ad33
              ActiveGoalStopReason::UsageLimit => {
                  ("usage-limit", codex_state::ThreadGoalStatus::UsageLimited)
              }
-diff --git a/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs b/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs
-index 4fa6e6721c4f96934537df16883c348fd61dcc18..76c4a9c09ccdd8b66f36fab890460936d3d5e997 100644
---- a/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs
-+++ b/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs
-@@ -4,6 +4,7 @@ use crate::ExtensionData;
- use codex_mcp::McpResourceClient;
- use codex_protocol::protocol::SessionSource;
- use codex_protocol::protocol::TurnEnvironmentSelection;
-+use codex_tools::ConversationHistory;
+diff --git a/codex-rs/ext/items/src/lib.rs b/codex-rs/ext/items/src/lib.rs
+index e1725f7c53fd32d3cdf813b20eb0a3b49e9da6f2..da50c7ab5a80c349c14b5134a5ec3c3dad1bbd29 100644
+--- a/codex-rs/ext/items/src/lib.rs
++++ b/codex-rs/ext/items/src/lib.rs
+@@ -9,6 +9,7 @@ use serde::Serialize;
+ use ts_rs::TS;
  
- /// Trusted, host-resolved billing attribution for a thread.
- ///
-@@ -41,6 +42,12 @@ pub struct ThreadResumeInput<'a> {
+ pub mod image_generation;
++pub mod shadow;
+ pub mod sleep;
+ pub mod web_search;
  
- /// Input supplied when the host has no immediately pending thread work.
- pub struct ThreadIdleInput<'a> {
-+    /// The main turn whose completion produced this idle edge.
-+    pub completed_turn_id: Option<&'a str>,
-+    /// Monotonic host epoch. Starting any new main turn invalidates old epochs.
-+    pub idle_epoch: u64,
-+    /// Host-owned raw history snapshot for extensions that need bounded context.
-+    pub trajectory: ConversationHistory,
-     /// Store scoped to the host session runtime.
-     pub session_store: &'a ExtensionData,
-     /// Store scoped to this thread runtime.
+@@ -42,6 +43,9 @@ pub enum ExtensionItem {
+     #[serde(rename = "web.search")]
+     #[ts(rename = "web.search")]
+     WebSearch(web_search::WebSearchItem),
++    #[serde(rename = "shadow.report")]
++    #[ts(rename = "shadow.report")]
++    ShadowReport(shadow::ShadowReportItem),
+ }
+ 
+ impl ExtensionItem {
+@@ -52,6 +56,7 @@ impl ExtensionItem {
+             Self::ImageGeneration(item) => &item.id,
+             Self::Sleep(item) => &item.id,
+             Self::WebSearch(item) => &item.id,
++            Self::ShadowReport(item) => &item.id,
+         }
+     }
+ }
+diff --git a/codex-rs/ext/items/src/shadow.rs b/codex-rs/ext/items/src/shadow.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..61cf21e2840a98eee2ad8ceab86b7993d6dac9dc
+--- /dev/null
++++ b/codex-rs/ext/items/src/shadow.rs
+@@ -0,0 +1,15 @@
++use schemars::JsonSchema;
++use serde::Deserialize;
++use serde::Serialize;
++use ts_rs::TS;
++
++/// A completed report produced by a Shadow extension.
++#[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
++#[serde(rename_all = "camelCase")]
++#[ts(rename_all = "camelCase")]
++pub struct ShadowReportItem {
++    pub id: String,
++    pub shadow_id: String,
++    pub shadow_name: String,
++    pub content: String,
++}
+diff --git a/codex-rs/ext/items/src/tests.rs b/codex-rs/ext/items/src/tests.rs
+index 036d4254e2559d68d30ea889bd89de5c397edc10..159a4f3b84c888338b93cd30b1348b2addee17d4 100644
+--- a/codex-rs/ext/items/src/tests.rs
++++ b/codex-rs/ext/items/src/tests.rs
+@@ -3,6 +3,7 @@ use serde_json::json;
+ 
+ use super::ExtensionItem;
+ use super::image_generation::ImageGenerationItem;
++use super::shadow::ShadowReportItem;
+ use super::sleep::SleepItem;
+ use super::web_search::WebSearchAction;
+ use super::web_search::WebSearchItem;
+@@ -107,6 +108,32 @@ fn sleep_item_preserves_stable_wire_shape() {
+     );
+ }
+ 
++#[test]
++fn shadow_report_item_preserves_stable_wire_shape() {
++    let item = ExtensionItem::ShadowReport(ShadowReportItem {
++        id: "shadow-report-1".to_string(),
++        shadow_id: "reviewer".to_string(),
++        shadow_name: "Reviewer".to_string(),
++        content: "Use a typed item.".to_string(),
++    });
++    let value = serde_json::to_value(&item).expect("serialize extension item");
++
++    assert_eq!(
++        value,
++        json!({
++            "kind": "shadow.report",
++            "id": "shadow-report-1",
++            "shadowId": "reviewer",
++            "shadowName": "Reviewer",
++            "content": "Use a typed item.",
++        })
++    );
++    assert_eq!(
++        serde_json::from_value::<ExtensionItem>(value).expect("deserialize extension item"),
++        item
++    );
++}
++
+ #[test]
+ fn unknown_extension_kind_is_rejected() {
+     let value = json!({
 diff --git a/codex-rs/ext/shadow/BUILD.bazel b/codex-rs/ext/shadow/BUILD.bazel
 new file mode 100644
 index 0000000000000000000000000000000000000000..7232a55ee3cf4205ed2bd6a1e91cdedd2e1bfd80
@@ -624,10 +2584,10 @@ index 0000000000000000000000000000000000000000..7232a55ee3cf4205ed2bd6a1e91cdedd
 +)
 diff --git a/codex-rs/ext/shadow/Cargo.toml b/codex-rs/ext/shadow/Cargo.toml
 new file mode 100644
-index 0000000000000000000000000000000000000000..06f080c53785a43d2c830d557695aae01520a210
+index 0000000000000000000000000000000000000000..cbaaf99d46a4cb634ad36f8fbaaa5c1d38f37985
 --- /dev/null
 +++ b/codex-rs/ext/shadow/Cargo.toml
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,29 @@
 +[package]
 +edition.workspace = true
 +license.workspace = true
@@ -645,6 +2605,7 @@ index 0000000000000000000000000000000000000000..06f080c53785a43d2c830d557695aae0
 +[dependencies]
 +codex-core = { workspace = true }
 +codex-extension-api = { workspace = true }
++codex-extension-items = { workspace = true }
 +codex-features = { workspace = true }
 +codex-protocol = { workspace = true }
 +serde = { workspace = true, features = ["derive"] }
@@ -658,10 +2619,10 @@ index 0000000000000000000000000000000000000000..06f080c53785a43d2c830d557695aae0
 +tempfile = { workspace = true }
 diff --git a/codex-rs/ext/shadow/src/lib.rs b/codex-rs/ext/shadow/src/lib.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698eb0509d82
+index 0000000000000000000000000000000000000000..78201802d8c325c177a8230316a310b8e548ee39
 --- /dev/null
 +++ b/codex-rs/ext/shadow/src/lib.rs
-@@ -0,0 +1,1124 @@
+@@ -0,0 +1,1265 @@
 +//! Small, host-independent Shadow Mind runtime primitives.
 +//!
 +//! The host integration owns spawning and response injection. This crate owns
@@ -675,6 +2636,7 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +use codex_core::config::Constrained;
 +use codex_core::config::Permissions;
 +use codex_extension_api::AgentSpawner;
++use codex_extension_api::AutomaticTurnOrigin;
 +use codex_extension_api::ExtensionFuture;
 +use codex_extension_api::ExtensionRegistryBuilder;
 +use codex_extension_api::ThreadIdleInput;
@@ -685,9 +2647,12 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +use codex_extension_api::TurnErrorInput;
 +use codex_extension_api::TurnLifecycleContributor;
 +use codex_extension_api::TurnStartInput;
++use codex_extension_items::ExtensionItem;
++use codex_extension_items::shadow::ShadowReportItem;
 +use codex_features::Feature;
 +use codex_protocol::ThreadId;
 +use codex_protocol::error::CodexErr;
++use codex_protocol::items::TurnItem;
 +use codex_protocol::models::ContentItem;
 +use codex_protocol::models::PermissionProfile;
 +use codex_protocol::models::ResponseItem;
@@ -721,6 +2686,10 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +
 +pub const DEFAULT_MAX_PARALLEL: usize = 2;
 +pub const DEFAULT_REPORT_BATCH_WINDOW_MS: u64 = 400;
++/// Maximum UTF-8 bytes retained from a Shadow report before it is shown or
++/// injected into the main model context. The byte cap is below the 10K-token
++/// item limit even when the tokenizer falls back to one token per byte.
++pub const MAX_SHADOW_REPORT_CONTENT_BYTES: usize = 8_000;
 +pub const MAX_TRAJECTORY_CHARS: usize = 32_000;
 +pub const MAX_TRAJECTORY_ITEM_CHARS: usize = 4_000;
 +
@@ -897,6 +2866,7 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +        for run in self.runs().values() {
 +            run.cancel();
 +        }
++        self.reports().clear();
 +    }
 +
 +    /// The only lifecycle edge allowed to schedule a heartbeat.
@@ -1226,6 +3196,9 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +            let Some(completed_turn_id) = input.completed_turn_id else {
 +                return;
 +            };
++            if !shadow_heartbeat_allowed(input.completed_turn_origin) {
++                return;
++            }
 +            if !state.runtime.schedule_once(completed_turn_id) {
 +                return;
 +            }
@@ -1463,7 +3436,7 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +    let report = ShadowReport {
 +        shadow_id: shadow.id.clone(),
 +        shadow_name: shadow.name.clone(),
-+        content,
++        content: truncate_shadow_report_content(content),
 +        epoch: expected_epoch,
 +        run_id: run.run_id.clone(),
 +    };
@@ -1488,14 +3461,20 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +        state.runtime.finish_run(&run.run_id);
 +        return;
 +    }
-+    let items = reports
-+        .into_iter()
-+        .map(|report| shadow_report_item(&report))
++    let display_items = reports.iter().map(shadow_report_item).collect::<Vec<_>>();
++    let model_items = reports
++        .iter()
++        .map(shadow_report_response_item)
 +        .collect::<Vec<_>>();
 +    if let Some(manager) = host.thread_manager.upgrade()
 +        && let Ok(parent) = manager.get_thread(state.thread_id).await
 +        && let Err(error) = parent
-+            .try_start_turn_if_idle_for_epoch(expected_epoch, items)
++            .try_start_turn_if_idle_for_epoch_with_origin(
++                expected_epoch,
++                AutomaticTurnOrigin::Extension("shadow".to_owned()),
++                display_items,
++                model_items,
++            )
 +            .await
 +    {
 +        tracing::debug!(reason = ?error.reason(), "shadow report dropped at idle boundary");
@@ -1508,6 +3487,22 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +    seed.hash(&mut hasher);
 +    shadow_id.hash(&mut hasher);
 +    (hasher.finish() as f64) / (u64::MAX as f64)
++}
++
++fn shadow_heartbeat_allowed(origin: Option<&AutomaticTurnOrigin>) -> bool {
++    !origin.is_some_and(|origin| origin.is_extension("shadow"))
++}
++
++fn truncate_shadow_report_content(mut content: String) -> String {
++    if content.len() <= MAX_SHADOW_REPORT_CONTENT_BYTES {
++        return content;
++    }
++    let mut end = MAX_SHADOW_REPORT_CONTENT_BYTES;
++    while !content.is_char_boundary(end) {
++        end -= 1;
++    }
++    content.truncate(end);
++    content
 +}
 +
 +fn format_shadow_prompt(
@@ -1566,7 +3561,16 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +    output
 +}
 +
-+fn shadow_report_item(report: &ShadowReport) -> ResponseItem {
++fn shadow_report_item(report: &ShadowReport) -> TurnItem {
++    TurnItem::Extension(ExtensionItem::ShadowReport(ShadowReportItem {
++        id: format!("shadow-report-{}", report.run_id),
++        shadow_id: report.shadow_id.clone(),
++        shadow_name: report.shadow_name.clone(),
++        content: report.content.clone(),
++    }))
++}
++
++fn shadow_report_response_item(report: &ShadowReport) -> ResponseItem {
 +    ResponseItem::Message {
 +        id: None,
 +        role: "user".to_owned(),
@@ -1605,6 +3609,20 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +        assert!(runtime.schedule_once("turn-1"));
 +        assert!(!runtime.schedule_once("turn-1"));
 +        assert!(runtime.schedule_once("turn-2"));
++    }
++
++    #[test]
++    fn shadow_origin_alone_suppresses_heartbeat() {
++        assert!(!shadow_heartbeat_allowed(Some(
++            &AutomaticTurnOrigin::Extension("shadow".to_owned())
++        )));
++        assert!(shadow_heartbeat_allowed(None));
++        assert!(shadow_heartbeat_allowed(Some(
++            &AutomaticTurnOrigin::Unspecified
++        )));
++        assert!(shadow_heartbeat_allowed(Some(
++            &AutomaticTurnOrigin::Extension("goal".to_owned())
++        )));
 +    }
 +
 +    #[test]
@@ -1679,6 +3697,53 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +        assert!(output.len() <= MAX_TRAJECTORY_CHARS);
 +    }
 +
++    #[test]
++    fn shadow_report_content_is_utf8_safely_bounded_for_display_and_model() {
++        let content = format!("{}界tail", "a".repeat(MAX_SHADOW_REPORT_CONTENT_BYTES - 1));
++        let report = ShadowReport {
++            shadow_id: "reviewer".to_owned(),
++            shadow_name: "Reviewer".to_owned(),
++            content: truncate_shadow_report_content(content),
++            epoch: 0,
++            run_id: "1".to_owned(),
++        };
++
++        assert_eq!(
++            report.content,
++            "a".repeat(MAX_SHADOW_REPORT_CONTENT_BYTES - 1)
++        );
++        assert!(report.content.len() <= MAX_SHADOW_REPORT_CONTENT_BYTES);
++        let TurnItem::Extension(ExtensionItem::ShadowReport(display_item)) =
++            shadow_report_item(&report)
++        else {
++            panic!("expected shadow report display item");
++        };
++        let ResponseItem::Message { content, .. } = shadow_report_response_item(&report) else {
++            panic!("expected shadow report model message");
++        };
++        let [ContentItem::InputText { text }] = content.as_slice() else {
++            panic!("expected one model text item");
++        };
++        assert_eq!(display_item.content, report.content);
++        assert_eq!(text, &format!("[shadow:Reviewer] {}", report.content));
++    }
++
++    #[test]
++    fn accepted_report_is_drained_once() {
++        let runtime = ThreadRuntime::default();
++        let report = ShadowReport {
++            shadow_id: "reviewer".to_owned(),
++            shadow_name: "Reviewer".to_owned(),
++            content: "accepted".to_owned(),
++            epoch: runtime.epoch(),
++            run_id: "1".to_owned(),
++        };
++
++        assert!(runtime.accept_idle_report(report.clone(), runtime.epoch()));
++        assert_eq!(runtime.take_reports_for_delivery(), vec![report]);
++        assert!(runtime.take_reports_for_delivery().is_empty());
++    }
++
 +    #[tokio::test]
 +    async fn cancellation_and_timeout_are_distinct() {
 +        let runtime = ThreadRuntime::default();
@@ -1693,6 +3758,7 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +            .await,
 +            WaitOutcome::Cancelled
 +        );
++        assert!(runtime.take_reports().is_empty());
 +
 +        let run = runtime.start_run();
 +        assert_eq!(
@@ -1704,6 +3770,31 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +            .await,
 +            WaitOutcome::TimedOut
 +        );
++        assert!(runtime.take_reports().is_empty());
++    }
++
++    #[test]
++    fn cancel_and_user_input_clear_undelivered_reports() {
++        let runtime = ThreadRuntime::default();
++        let run = runtime.start_run();
++        let report = ShadowReport {
++            shadow_id: "reviewer".to_owned(),
++            shadow_name: "Reviewer".to_owned(),
++            content: "pending".to_owned(),
++            epoch: runtime.epoch(),
++            run_id: run.run_id.clone(),
++        };
++        assert!(runtime.accept_idle_report(report.clone(), runtime.epoch()));
++
++        runtime.cancel_runs();
++        assert!(run.is_cancelled());
++        assert!(runtime.take_reports().is_empty());
++
++        let run = runtime.start_run();
++        assert!(runtime.accept_idle_report(report, runtime.epoch()));
++        runtime.begin_user_input();
++        assert!(run.is_cancelled());
++        assert!(runtime.take_reports().is_empty());
 +    }
 +
 +    #[test]
@@ -1751,6 +3842,17 @@ index 0000000000000000000000000000000000000000..c31d05727e1515f0bbf6c5ed3fcc698e
 +                file_path: PathBuf::from("reviewer.md"),
 +            }
 +        );
++    }
++
++    #[test]
++    fn registry_uses_shadow_id_as_missing_name_fallback() {
++        let shadow = parse_shadow_markdown(
++            "---\nid: reviewer\n---\ncheck",
++            PathBuf::from("reviewer.md"),
++        )
++        .expect("parse");
++
++        assert_eq!(shadow.name, shadow.id);
 +    }
 +
 +    #[test]
@@ -1812,6 +3914,86 @@ index d291dbeffa4c92fa01753a1f1ebad6f36b2d3469..4ce1a7c58a5aca185f8ec81dcb0280e8
      FeatureSpec {
          id: Feature::TokenBudget,
          key: "token_budget",
+diff --git a/codex-rs/rollout/src/persistence_metrics_tests.rs b/codex-rs/rollout/src/persistence_metrics_tests.rs
+index 3a352263b7bea426cb1da38190de706942aeacb5..db36f43c40850769cbc71ff893e18226af1dd44a 100644
+--- a/codex-rs/rollout/src/persistence_metrics_tests.rs
++++ b/codex-rs/rollout/src/persistence_metrics_tests.rs
+@@ -1,3 +1,5 @@
++use codex_extension_items::ExtensionItem;
++use codex_extension_items::shadow::ShadowReportItem;
+ use codex_protocol::ThreadId;
+ use codex_protocol::items::EnteredReviewModeItem;
+ use codex_protocol::items::ExitedReviewModeItem;
+@@ -345,3 +347,28 @@ fn review_mode_persistence_depends_on_history_mode() {
+         serde_json::to_value(completed_items).expect("serialize expected items")
+     );
+ }
++
++#[test]
++fn shadow_report_completion_is_persisted_in_both_history_modes() {
++    let completed = RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
++        thread_id: ThreadId::default(),
++        turn_id: "turn".to_string(),
++        item: TurnItem::Extension(ExtensionItem::ShadowReport(ShadowReportItem {
++            id: "shadow-report-1".to_string(),
++            shadow_id: "reviewer".to_string(),
++            shadow_name: "Reviewer".to_string(),
++            content: "Persist this report.".to_string(),
++        })),
++        completed_at_ms: 0,
++    }));
++
++    for history_mode in [ThreadHistoryMode::Legacy, ThreadHistoryMode::Paginated] {
++        let (persisted, _) =
++            measure_and_filter_rollout_items(std::slice::from_ref(&completed), history_mode);
++        assert_eq!(
++            serde_json::to_value(persisted).expect("serialize persisted items"),
++            serde_json::to_value(std::slice::from_ref(&completed))
++                .expect("serialize expected items")
++        );
++    }
++}
+diff --git a/codex-rs/rollout/src/policy.rs b/codex-rs/rollout/src/policy.rs
+index 65a8213f08fde9804d46cc78ea5d2214e344b6ed..8666776cb36b18da747491b863108d599daf3067 100644
+--- a/codex-rs/rollout/src/policy.rs
++++ b/codex-rs/rollout/src/policy.rs
+@@ -92,7 +92,9 @@ pub fn should_persist_event_msg(ev: &EventMsg, history_mode: ThreadHistoryMode)
+             matches!(history_mode, ThreadHistoryMode::Paginated)
+                 || matches!(
+                     event.item,
+-                    TurnItem::Plan(_) | TurnItem::Extension(ExtensionItem::Sleep(_))
++                    TurnItem::Plan(_)
++                        | TurnItem::Extension(ExtensionItem::Sleep(_))
++                        | TurnItem::Extension(ExtensionItem::ShadowReport(_))
+                 )
+         }
+         EventMsg::TokenCount(_)
+diff --git a/codex-rs/thread-store/src/local/thread_history.rs b/codex-rs/thread-store/src/local/thread_history.rs
+index 616c627969b468dd1f0f1d30f17654d3bd1a0933..4f5af3489cf374e7bf3b4da465a413a99cb7eb52 100644
+--- a/codex-rs/thread-store/src/local/thread_history.rs
++++ b/codex-rs/thread-store/src/local/thread_history.rs
+@@ -402,7 +402,8 @@ WHERE thread_id = ?
+             | ThreadItem::ImageGeneration(_)
+             | ThreadItem::EnteredReviewMode { .. }
+             | ThreadItem::ExitedReviewMode { .. }
+-            | ThreadItem::ContextCompaction { .. } => {}
++            | ThreadItem::ContextCompaction { .. }
++            | ThreadItem::ShadowReport(_) => {}
+         }
+     }
+     Ok(())
+diff --git a/codex-rs/thread-store/src/local/thread_history/search.rs b/codex-rs/thread-store/src/local/thread_history/search.rs
+index 46e61dd192f545824527fb3282a68d4f217dc199..13f14780ba932ff7c600b33a2987ab99ca33ab64 100644
+--- a/codex-rs/thread-store/src/local/thread_history/search.rs
++++ b/codex-rs/thread-store/src/local/thread_history/search.rs
+@@ -276,6 +276,7 @@ fn searchable_text(item: &ThreadItem) -> Option<Cow<'_, str>> {
+         | ThreadItem::EnteredReviewMode { .. }
+         | ThreadItem::ExitedReviewMode { .. }
+         | ThreadItem::ContextCompaction { .. } => None,
++        ThreadItem::ShadowReport(_) => None,
+     }
+ }
+ 
 diff --git a/codex-rs/tui/Cargo.toml b/codex-rs/tui/Cargo.toml
 index 7fd75990ebc2702e991c1edd997b577832f5f504..dc746f81b7ddcc3c89371fb35d3fa4affea6ba78 100644
 --- a/codex-rs/tui/Cargo.toml
@@ -1824,6 +4006,20 @@ index 7fd75990ebc2702e991c1edd997b577832f5f504..dc746f81b7ddcc3c89371fb35d3fa4af
  codex-sandboxing = { workspace = true }
  codex-shell-command = { workspace = true }
  codex-state = { workspace = true }
+diff --git a/codex-rs/tui/src/app/agent_status_feed.rs b/codex-rs/tui/src/app/agent_status_feed.rs
+index efaa6c5ad809941df74757c54c7f3e3c1e76988c..2c924551b4f526224a15c2b2d3828b6d346ca709 100644
+--- a/codex-rs/tui/src/app/agent_status_feed.rs
++++ b/codex-rs/tui/src/app/agent_status_feed.rs
+@@ -189,6 +189,9 @@ fn activity_summary(item: &ThreadItem) -> Option<String> {
+         ThreadItem::EnteredReviewMode { .. } => return Some("Entered review mode".to_string()),
+         ThreadItem::ExitedReviewMode { .. } => return Some("Exited review mode".to_string()),
+         ThreadItem::ContextCompaction { .. } => return Some("Compacted context".to_string()),
++        ThreadItem::ShadowReport(item) => {
++            return bounded_summary(&format!("Shadow: {}", item.shadow_name));
++        }
+         ThreadItem::UserMessage { .. } | ThreadItem::HookPrompt { .. } | ThreadItem::Sleep(_) => {
+             return None;
+         }
 diff --git a/codex-rs/tui/src/bottom_pane/slash_commands.rs b/codex-rs/tui/src/bottom_pane/slash_commands.rs
 index 6ca1ba93d137e3ca4c47f02dfe7105f678a028d1..656fe63c0c0a189dee3e635a689a59abb6c9f1cd 100644
 --- a/codex-rs/tui/src/bottom_pane/slash_commands.rs
@@ -1836,6 +4032,23 @@ index 6ca1ba93d137e3ca4c47f02dfe7105f678a028d1..656fe63c0c0a189dee3e635a689a59ab
                  SlashCommand::Usage,
              ]
          );
+diff --git a/codex-rs/tui/src/chatwidget/replay.rs b/codex-rs/tui/src/chatwidget/replay.rs
+index fad6eb8473e260bba34a851f9d9c7629709694d1..c2c0a9e32fe788399c0d0c49bafd0884efcbffff 100644
+--- a/codex-rs/tui/src/chatwidget/replay.rs
++++ b/codex-rs/tui/src/chatwidget/replay.rs
+@@ -189,6 +189,12 @@ impl ChatWidget {
+             ThreadItem::ContextCompaction { .. } => {
+                 self.add_info_message("Context compacted".to_string(), /*hint*/ None);
+             }
++            ThreadItem::ShadowReport(item) => {
++                self.add_to_history(history_cell::new_shadow_report(
++                    item.shadow_name,
++                    item.content,
++                ));
++            }
+             ThreadItem::HookPrompt { .. } => {}
+             ThreadItem::CollabAgentToolCall {
+                 id,
 diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 index e28cfd7043c98dd779394af82b3692bc89118ae6..420d43975792242f477c6ba7f0bce0f4873f28e3 100644
 --- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
@@ -2014,6 +4227,122 @@ index 47d597db926ee7317e13ec98d267b6a9fc9b7363..6980275e99ba9f52e66089c6a6a08fe3
  #[tokio::test]
  async fn goal_edit_slash_command_opens_goal_editor() {
      for thread_id in [Some(ThreadId::new()), None] {
+diff --git a/codex-rs/tui/src/history_cell/mod.rs b/codex-rs/tui/src/history_cell/mod.rs
+index d0ce17edc53634b1916fb387939580ba327a79a0..de928aaa357007fec9c5f7c896fb3031abf0834b 100644
+--- a/codex-rs/tui/src/history_cell/mod.rs
++++ b/codex-rs/tui/src/history_cell/mod.rs
+@@ -123,6 +123,7 @@ mod request_user_input;
+ mod search;
+ mod separators;
+ mod session;
++mod shadow;
+ 
+ pub(crate) use approvals::*;
+ pub(crate) use base::*;
+@@ -139,6 +140,7 @@ pub(crate) use request_user_input::*;
+ pub(crate) use search::*;
+ pub(crate) use separators::*;
+ pub(crate) use session::*;
++pub(crate) use shadow::*;
+ 
+ #[cfg(test)]
+ mod tests;
+diff --git a/codex-rs/tui/src/history_cell/shadow.rs b/codex-rs/tui/src/history_cell/shadow.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a767709870b54e231c8a3a78f1117762406d7f5
+--- /dev/null
++++ b/codex-rs/tui/src/history_cell/shadow.rs
+@@ -0,0 +1,53 @@
++use super::*;
++
++#[derive(Debug)]
++pub(crate) struct ShadowReportHistoryCell {
++    shadow_name: String,
++    content: String,
++}
++
++impl ShadowReportHistoryCell {
++    pub(crate) fn new(shadow_name: String, content: String) -> Self {
++        Self {
++            shadow_name,
++            content,
++        }
++    }
++}
++
++pub(crate) fn new_shadow_report(shadow_name: String, content: String) -> ShadowReportHistoryCell {
++    ShadowReportHistoryCell::new(shadow_name, content)
++}
++
++impl HistoryCell for ShadowReportHistoryCell {
++    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
++        let mut lines = vec![
++            vec![
++                "Shadow".magenta().bold(),
++                " · ".dim(),
++                self.shadow_name.clone().magenta().bold(),
++            ]
++            .into(),
++        ];
++        let wrap_width = width.saturating_sub(2).max(1) as usize;
++        let body = self
++            .content
++            .lines()
++            .map(|line| Line::from(line.to_string().dim()))
++            .collect::<Vec<_>>();
++        let wrapped = adaptive_wrap_lines(
++            &body,
++            RtOptions::new(wrap_width)
++                .initial_indent("  ".into())
++                .subsequent_indent("  ".into()),
++        );
++        push_owned_lines(&wrapped, &mut lines);
++        lines
++    }
++
++    fn raw_lines(&self) -> Vec<Line<'static>> {
++        std::iter::once(Line::from(format!("Shadow · {}", self.shadow_name)))
++            .chain(self.content.lines().map(|line| Line::from(line.to_owned())))
++            .collect()
++    }
++}
+diff --git a/codex-rs/tui/src/history_cell/tests.rs b/codex-rs/tui/src/history_cell/tests.rs
+index 5535b2e70a549b2527eea86bd09d90cb93559a74..bad1efca8a219c9c88f26f7a8e313917da6de4cc 100644
+--- a/codex-rs/tui/src/history_cell/tests.rs
++++ b/codex-rs/tui/src/history_cell/tests.rs
+@@ -1132,6 +1132,32 @@ fn web_search_history_cell_snapshot() {
+     insta::assert_snapshot!(rendered);
+ }
+ 
++#[test]
++fn shadow_report_history_cell_snapshot() {
++    let cell = new_shadow_report(
++        "Reviewer".to_string(),
++        "First finding.\nA longer second finding that wraps at the configured width.".to_string(),
++    );
++    let rendered = render_lines(&cell.display_lines(/*width*/ 38)).join("\n");
++
++    insta::assert_snapshot!(rendered, @"Shadow · Reviewer
++  First finding.
++  A longer second finding that wraps
++  at the configured width.");
++}
++
++#[test]
++fn shadow_report_raw_transcript_preserves_identity_and_content() {
++    let cell = new_shadow_report(
++        "Reviewer".to_string(),
++        "First finding.\nSecond finding.".to_string(),
++    );
++
++    insta::assert_snapshot!(render_lines(&cell.raw_lines()).join("\n"), @"Shadow · Reviewer
++First finding.
++Second finding.");
++}
++
+ #[test]
+ fn standalone_unix_update_available_history_cell_snapshot() {
+     let cell =
 diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
 index abd1386932e1e6fe355135bfd13537f89753a629..d577e92f843e54de5987fda4cd5029f76d226300 100644
 --- a/codex-rs/tui/src/slash_command.rs
@@ -2067,3 +4396,27 @@ index abd1386932e1e6fe355135bfd13537f89753a629..d577e92f843e54de5987fda4cd5029f7
          assert!(SlashCommand::Ide.available_during_task());
          assert!(SlashCommand::Title.available_during_task());
          assert!(SlashCommand::Statusline.available_during_task());
+diff --git a/codex-rs/tui/src/thread_transcript.rs b/codex-rs/tui/src/thread_transcript.rs
+index c7b7a2bb8a0334637ea9162cdef3212b3de1d393..0379064c0bba58cf8cc36cf3439a04a2905b1c61 100644
+--- a/codex-rs/tui/src/thread_transcript.rs
++++ b/codex-rs/tui/src/thread_transcript.rs
+@@ -250,6 +250,19 @@ fn fallback_transcript_cell(item: &ThreadItem) -> Option<PlainHistoryCell> {
+         ThreadItem::ContextCompaction { .. } => {
+             vec!["context compacted".dim().into()]
+         }
++        ThreadItem::ShadowReport(item) => std::iter::once(
++            vec![
++                "Shadow · ".magenta().bold(),
++                item.shadow_name.clone().magenta().bold(),
++            ]
++            .into(),
++        )
++        .chain(
++            item.content
++                .lines()
++                .map(|line| vec!["  ".dim(), line.to_owned().dim()].into()),
++        )
++        .collect(),
+         ThreadItem::UserMessage { .. }
+         | ThreadItem::AgentMessage { .. }
+         | ThreadItem::Plan { .. }

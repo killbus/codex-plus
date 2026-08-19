@@ -2444,6 +2444,70 @@ async fn guardian_review_retries_transient_session_failure_then_approves() -> an
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn guardian_review_retries_http_429_then_approves() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let rate_limit = || {
+        wiremock::ResponseTemplate::new(429).set_body_json(serde_json::json!({
+            "error": {
+                "type": "rate_limit_exceeded",
+                "message": "temporary reviewer rate limit",
+            }
+        }))
+    };
+    let approval = serde_json::json!({
+        "risk_level": "low",
+        "user_authorization": "high",
+        "outcome": "allow",
+        "rationale": "rate limit retry succeeded",
+    })
+    .to_string();
+    let request_log = mount_response_sequence(
+        &server,
+        vec![
+            rate_limit(),
+            rate_limit(),
+            core_test_support::responses::sse_response(sse(vec![
+                ev_response_created("resp-rate-limit-approved"),
+                ev_assistant_message("msg-rate-limit-approved", &approval),
+                ev_completed("resp-rate-limit-approved"),
+            ])),
+        ],
+    )
+    .await;
+    let (session, turn) = guardian_test_session_and_turn(&server).await;
+    seed_guardian_parent_history(&session, &turn).await;
+
+    let (outcome, metadata) = run_guardian_review_session_for_test(
+        Arc::clone(&session),
+        Arc::clone(&turn),
+        guardian_shell_request("shell-rate-limit-retry"),
+        /*retry_reason*/ None,
+        guardian_output_schema(),
+        /*external_cancel*/ None,
+        /*max_attempts*/ 3,
+    )
+    .await;
+
+    let GuardianReviewOutcome::Completed(assessment) = outcome else {
+        panic!("expected guardian assessment after retrying HTTP 429");
+    };
+    assert_eq!(assessment.outcome, GuardianAssessmentOutcome::Allow);
+    assert_eq!(assessment.rationale, "rate limit retry succeeded");
+    // A generic HTTP 429 is terminal at the sampling-request layer as
+    // `CodexErr::RetryLimit`; each response therefore exhausts one Guardian
+    // session attempt before the bounded Guardian loop retries the review.
+    assert_eq!(metadata.attempt_count, 3);
+    assert!(matches!(
+        metadata.guardian_session_kind,
+        Some(codex_analytics::GuardianReviewSessionKind::TrunkReused)
+    ));
+    assert_eq!(request_log.requests().len(), 3);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn guardian_review_does_not_retry_missing_assessment_payload() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 

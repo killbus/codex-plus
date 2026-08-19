@@ -82,6 +82,17 @@ jobs:
         working-directory: codex-src/codex-rs
         run: cargo fmt --all -- --check
 
+      - name: Test Shadow runtime concurrency contracts
+        working-directory: codex-src/codex-rs
+        shell: bash
+        run: |
+          status=0
+          cargo test --locked -p codex-core idle_reservation_cannot_be_overwritten_by_concurrent_spawn_task --lib || status=1
+          cargo test --locked -p codex-core try_start_turn_if_idle_rejects_in_flight_client_user_input --lib || status=1
+          cargo test --locked -p codex-shadow-extension old_epoch_delivery_worker_cannot_drain_new_epoch_report || status=1
+          cargo test --locked -p codex-shadow-extension cancelled_same_epoch_delivery_worker_cannot_drain_replacement_report || status=1
+          exit "$status"
+
       - name: Verify provenance and patch chain
         run: python scripts/verify_provenance.py --check --patch patches/goal-old-continuation.patch --patch patches/shadow-mind.patch
 

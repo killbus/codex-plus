@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/08-19-shadow-runtime-closure/prd.md","reason":"Check every deterministic race, end-to-end, replay, and mutation acceptance criterion"}
+{"file":".trellis/tasks/archive/2026-08/08-16-shadow-extension/design.md","reason":"Ensure the fix preserves the original native Shadow architecture rather than adding workarounds"}
+{"file":"codex-src/AGENTS.md","reason":"Enforce integration coverage and complete affected-crate quality gates"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify native Shadow delivery, public representation, and patch provenance"}

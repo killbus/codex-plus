@@ -59,6 +59,54 @@ use tracing::debug;
 use tracing::info;
 use tracing::warn;
 
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(super) struct ClientInputEntryTestGate {
+    reached: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+impl ClientInputEntryTestGate {
+    pub(super) async fn wait_until_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(super) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+#[cfg(test)]
+static CLIENT_INPUT_ENTRY_TEST_GATES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, ClientInputEntryTestGate>>,
+> = std::sync::LazyLock::new(Default::default);
+
+#[cfg(test)]
+impl Session {
+    pub(super) fn install_client_input_entry_test_gate(&self, gate: ClientInputEntryTestGate) {
+        let previous = CLIENT_INPUT_ENTRY_TEST_GATES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(self.thread_id.to_string(), gate);
+        assert!(
+            previous.is_none(),
+            "client input entry test gate already installed"
+        );
+    }
+
+    async fn wait_at_client_input_entry_test_gate(&self) {
+        let gate = CLIENT_INPUT_ENTRY_TEST_GATES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.thread_id.to_string());
+        if let Some(gate) = gate {
+            gate.reached.notify_one();
+            gate.release.notified().await;
+        }
+    }
+}
+
 pub async fn interrupt(sess: &Arc<Session>) {
     sess.interrupt_task().await;
 }
@@ -190,6 +238,8 @@ pub(super) async fn user_input_or_turn_inner(
     else {
         unreachable!();
     };
+    #[cfg(test)]
+    sess.wait_at_client_input_entry_test_gate().await;
     let emit_thread_settings_applied = thread_settings != ThreadSettingsOverrides::default();
     let mut updates = if emit_thread_settings_applied {
         thread_settings_update(sess, thread_settings).await

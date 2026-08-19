@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/archive/2026-08/08-16-shadow-extension/design.md","reason":"Preserve the landed typed-item, atomic delivery, origin, and replay contracts while fixing runtime races"}
+{"file":".trellis/tasks/archive/2026-08/08-16-shadow-extension/research/shadow-report-lifecycle.md","reason":"Ground the native display, persistence, and origin boundaries in production code"}
+{"file":"codex-src/AGENTS.md","reason":"Follow Rust integration-test, formatting, lint, and API-surface requirements"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply the native Shadow delivery and ordered patch-chain contracts"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify runtime, app-server, persistence, and TUI flow as one contract"}

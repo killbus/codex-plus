@@ -13,7 +13,51 @@ use codex_protocol::models::ResponseItem;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(super) struct IdleStartTestGate {
+    reached: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+impl IdleStartTestGate {
+    pub(super) async fn wait_until_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(super) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+#[cfg(test)]
+static IDLE_START_TEST_GATES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, IdleStartTestGate>>,
+> = std::sync::LazyLock::new(Default::default);
+
 impl Session {
+    #[cfg(test)]
+    pub(super) fn install_idle_start_test_gate(&self, gate: IdleStartTestGate) {
+        let previous = IDLE_START_TEST_GATES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(self.thread_id.to_string(), gate);
+        assert!(previous.is_none(), "idle start test gate already installed");
+    }
+
+    #[cfg(test)]
+    async fn wait_at_idle_start_test_gate(&self) {
+        let gate = IDLE_START_TEST_GATES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.thread_id.to_string());
+        if let Some(gate) = gate {
+            gate.reached.notify_one();
+            gate.release.notified().await;
+        }
+    }
+
     /// Returns the input if there is no active turn to inject into.
     #[expect(
         clippy::await_holding_invalid_type,
@@ -219,6 +263,8 @@ impl Session {
         self.input_queue
             .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_input)
             .await;
+        #[cfg(test)]
+        self.wait_at_idle_start_test_gate().await;
         self.start_task(turn_context, Vec::new(), RegularTask::new())
             .await;
         Ok(())

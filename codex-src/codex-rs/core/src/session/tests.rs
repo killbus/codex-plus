@@ -10220,6 +10220,173 @@ async fn try_start_turn_if_idle_with_origin_orders_shadow_item_and_rejects_dupli
 }
 
 #[tokio::test]
+async fn idle_reservation_cannot_be_overwritten_by_concurrent_spawn_task() {
+    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
+    let user_turn = sess
+        .new_default_turn_with_sub_id("concurrent-user-turn".to_owned())
+        .await;
+    let gate = super::inject::IdleStartTestGate::default();
+    sess.install_idle_start_test_gate(gate.clone());
+    let idle_epoch = sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire);
+    let idle_session = Arc::clone(&sess);
+    let idle_start = tokio::spawn(async move {
+        idle_session
+            .try_start_turn_if_idle_for_epoch_with_origin(
+                idle_epoch,
+                AutomaticTurnOrigin::Extension("shadow".to_owned()),
+                vec![shadow_report_turn_item("shadow-reservation-race")],
+                vec![user_message("shadow report")],
+            )
+            .await
+    });
+
+    tokio::time::timeout(StdDuration::from_secs(2), gate.wait_until_reached())
+        .await
+        .expect("idle start should reserve the turn before task installation");
+    let reserved_turn_state = {
+        let active_turn = sess.active_turn.lock().await;
+        let active_turn = active_turn
+            .as_ref()
+            .expect("idle start should leave an owned reservation");
+        assert!(active_turn.task.is_none());
+        Arc::clone(&active_turn.turn_state)
+    };
+    sess.spawn_task(
+        Arc::clone(&user_turn),
+        vec![TurnInput::UserInput {
+            content: vec![UserInput::Text {
+                text: "concurrent user input".to_owned(),
+                text_elements: Vec::new(),
+            }],
+            client_id: None,
+        }],
+        NeverEndingTask {
+            kind: TaskKind::Regular,
+            listen_to_cancellation_token: true,
+        },
+    )
+    .await;
+    gate.release();
+
+    let idle_error = tokio::time::timeout(StdDuration::from_secs(2), idle_start)
+        .await
+        .expect("idle start should finish after the test gate opens")
+        .expect("idle start must not panic when reservation ownership changes")
+        .expect_err("concurrent user task should retain ownership");
+    assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, idle_error.reason());
+    let active_turn = sess
+        .active_turn
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|active_turn| active_turn.task.as_ref())
+        .map(|task| {
+            (
+                task.turn_context.sub_id.clone(),
+                task.turn_context.automatic_turn_origin.clone(),
+            )
+        });
+    assert_eq!(
+        active_turn,
+        Some((user_turn.sub_id.clone(), AutomaticTurnOrigin::Unspecified,))
+    );
+    assert!(
+        sess.input_queue
+            .take_pending_input_for_turn_state(reserved_turn_state.as_ref())
+            .await
+            .is_empty(),
+        "rejected Shadow work must not remain queued on the detached reservation"
+    );
+    assert!(
+        !sess.input_queue.has_pending_input(&sess.active_turn).await,
+        "rejected Shadow work must not be transferred into the user turn"
+    );
+
+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+}
+
+#[tokio::test]
+async fn try_start_turn_if_idle_rejects_in_flight_client_user_input() {
+    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
+    let gate = super::handlers::ClientInputEntryTestGate::default();
+    sess.install_client_input_entry_test_gate(gate.clone());
+    let idle_epoch = sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire);
+    let user_session = Arc::clone(&sess);
+    let user_input = tokio::spawn(async move {
+        handlers::user_input_or_turn_inner(
+            &user_session,
+            "in-flight-user-turn".to_owned(),
+            Op::UserInput {
+                items: vec![UserInput::Text {
+                    text: "client input already entered".to_owned(),
+                    text_elements: Vec::new(),
+                }],
+                final_output_json_schema: None,
+                responsesapi_client_metadata: None,
+                additional_context: Default::default(),
+                thread_settings: Default::default(),
+            },
+            /*client_user_message_id*/ None,
+        )
+        .await;
+    });
+
+    tokio::time::timeout(StdDuration::from_secs(2), gate.wait_until_reached())
+        .await
+        .expect("client input should reach the entry gate");
+    let shadow_start = sess
+        .try_start_turn_if_idle_for_epoch_with_origin(
+            idle_epoch,
+            AutomaticTurnOrigin::Extension("shadow".to_owned()),
+            vec![shadow_report_turn_item("shadow-client-race")],
+            vec![user_message("shadow report")],
+        )
+        .await;
+    assert!(
+        shadow_start.is_err(),
+        "Shadow must not start after real client work has entered the session"
+    );
+
+    gate.release();
+    tokio::time::timeout(StdDuration::from_secs(2), user_input)
+        .await
+        .expect("client input handler should finish after the test gate opens")
+        .expect("client input handler should not panic");
+    let active_turn = sess
+        .active_turn
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|active_turn| active_turn.task.as_ref())
+        .map(|task| {
+            (
+                task.turn_context.sub_id.clone(),
+                task.turn_context.automatic_turn_origin.clone(),
+            )
+        });
+    let active_or_completed_turn = match active_turn {
+        Some(active_turn) => active_turn,
+        None => {
+            let terminal = recv_terminal_event(&rx, TerminalEventKind::TurnComplete).await;
+            assert_eq!(terminal.id, "in-flight-user-turn");
+            sess.last_completed_turn
+                .lock()
+                .await
+                .clone()
+                .expect("completed user turn should record its origin")
+        }
+    };
+    assert_eq!(
+        active_or_completed_turn,
+        (
+            "in-flight-user-turn".to_owned(),
+            AutomaticTurnOrigin::Unspecified,
+        )
+    );
+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+}
+
+#[tokio::test]
 async fn steer_input_requires_active_turn() {
     let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
     let input = vec![UserInput::Text {

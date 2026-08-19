@@ -315,7 +315,11 @@ impl ThreadRuntime {
         true
     }
 
-    fn take_reports_for_delivery(&self) -> Vec<ShadowReport> {
+    fn take_reports_for_delivery(
+        &self,
+        _run: &RunHandle,
+        _expected_epoch: u64,
+    ) -> Vec<ShadowReport> {
         std::mem::take(&mut *self.reports())
     }
 
@@ -831,7 +835,9 @@ async fn run_shadow<S>(
         state.runtime.finish_run(&run.run_id);
         return;
     };
-    let reports = state.runtime.take_reports_for_delivery();
+    let reports = state
+        .runtime
+        .take_reports_for_delivery(&run, expected_epoch);
     if reports.is_empty() {
         state.runtime.finish_run(&run.run_id);
         return;
@@ -1106,17 +1112,142 @@ mod tests {
     #[test]
     fn accepted_report_is_drained_once() {
         let runtime = ThreadRuntime::default();
+        let run = runtime.start_run();
         let report = ShadowReport {
             shadow_id: "reviewer".to_owned(),
             shadow_name: "Reviewer".to_owned(),
             content: "accepted".to_owned(),
             epoch: runtime.epoch(),
-            run_id: "1".to_owned(),
+            run_id: run.run_id.clone(),
         };
 
         assert!(runtime.accept_idle_report(report.clone(), runtime.epoch()));
-        assert_eq!(runtime.take_reports_for_delivery(), vec![report]);
-        assert!(runtime.take_reports_for_delivery().is_empty());
+        assert_eq!(
+            runtime.take_reports_for_delivery(&run, runtime.epoch()),
+            vec![report]
+        );
+        assert!(
+            runtime
+                .take_reports_for_delivery(&run, runtime.epoch())
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn old_epoch_delivery_worker_cannot_drain_new_epoch_report() {
+        let runtime = Arc::new(ThreadRuntime::default());
+        let old_epoch = runtime.epoch();
+        let old_run = runtime.start_run();
+        let held_delivery = runtime
+            .delivery_permit()
+            .await
+            .expect("delivery semaphore should be open");
+        let (waiting_tx, waiting_rx) = tokio::sync::oneshot::channel();
+        let worker_runtime = Arc::clone(&runtime);
+        let worker_run = old_run.clone();
+        let old_worker = tokio::spawn(async move {
+            waiting_tx
+                .send(())
+                .expect("test should still be waiting for old worker");
+            let _delivery = worker_runtime
+                .delivery_permit()
+                .await
+                .expect("delivery semaphore should be open");
+            worker_runtime.take_reports_for_delivery(&worker_run, old_epoch)
+        });
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), waiting_rx)
+            .await
+            .expect("old worker should reach the delivery semaphore")
+            .expect("old worker should signal before waiting");
+        runtime.epoch.fetch_add(1, Ordering::AcqRel);
+        assert!(!old_run.is_cancelled());
+
+        let new_epoch = runtime.epoch();
+        let replacement_run = runtime.start_run();
+        let new_report = ShadowReport {
+            shadow_id: "reviewer".to_owned(),
+            shadow_name: "Reviewer".to_owned(),
+            content: "new epoch report".to_owned(),
+            epoch: new_epoch,
+            run_id: replacement_run.run_id.clone(),
+        };
+        assert!(runtime.accept_idle_report(new_report.clone(), new_epoch));
+        drop(held_delivery);
+
+        let drained_by_old_worker =
+            tokio::time::timeout(std::time::Duration::from_secs(2), old_worker)
+                .await
+                .expect("old worker should finish after permit release")
+                .expect("old worker task should not panic");
+        assert!(
+            drained_by_old_worker.is_empty(),
+            "an old delivery worker drained reports accepted for epoch {new_epoch}: {drained_by_old_worker:?}"
+        );
+        assert_eq!(
+            runtime.take_reports_for_delivery(&replacement_run, new_epoch),
+            vec![new_report]
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_same_epoch_delivery_worker_cannot_drain_replacement_report() {
+        let runtime = Arc::new(ThreadRuntime::default());
+        let expected_epoch = runtime.epoch();
+        let old_run = runtime.start_run();
+        let held_delivery = runtime
+            .delivery_permit()
+            .await
+            .expect("delivery semaphore should be open");
+        let (waiting_tx, waiting_rx) = tokio::sync::oneshot::channel();
+        let worker_runtime = Arc::clone(&runtime);
+        let worker_run = old_run.clone();
+        let old_worker = tokio::spawn(async move {
+            assert!(!worker_run.is_cancelled());
+            waiting_tx
+                .send(())
+                .expect("test should still be waiting for old worker");
+            let _delivery = worker_runtime
+                .delivery_permit()
+                .await
+                .expect("delivery semaphore should be open");
+            worker_runtime.take_reports_for_delivery(&worker_run, expected_epoch)
+        });
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), waiting_rx)
+            .await
+            .expect("old worker should pass its cancellation check")
+            .expect("old worker should signal before waiting");
+        old_run.cancel();
+        assert!(old_run.is_cancelled());
+        assert_eq!(runtime.epoch(), expected_epoch);
+
+        let replacement_run = runtime.start_run();
+        let replacement_report = ShadowReport {
+            shadow_id: "reviewer".to_owned(),
+            shadow_name: "Reviewer".to_owned(),
+            content: "same epoch replacement".to_owned(),
+            epoch: expected_epoch,
+            run_id: replacement_run.run_id.clone(),
+        };
+        assert!(
+            runtime.accept_idle_report(replacement_report.clone(), expected_epoch)
+        );
+        drop(held_delivery);
+
+        let drained_by_cancelled_worker =
+            tokio::time::timeout(std::time::Duration::from_secs(2), old_worker)
+                .await
+                .expect("old worker should finish after permit release")
+                .expect("old worker task should not panic");
+        assert!(
+            drained_by_cancelled_worker.is_empty(),
+            "a worker cancelled while waiting for delivery drained a same-epoch replacement: {drained_by_cancelled_worker:?}"
+        );
+        assert_eq!(
+            runtime.take_reports_for_delivery(&replacement_run, expected_epoch),
+            vec![replacement_report]
+        );
     }
 
     #[tokio::test]

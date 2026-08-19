@@ -1230,9 +1230,7 @@ mod tests {
             epoch: expected_epoch,
             run_id: replacement_run.run_id.clone(),
         };
-        assert!(
-            runtime.accept_idle_report(replacement_report.clone(), expected_epoch)
-        );
+        assert!(runtime.accept_idle_report(replacement_report.clone(), expected_epoch));
         drop(held_delivery);
 
         let drained_by_cancelled_worker =

@@ -47,7 +47,8 @@ pub(crate) struct Session {
     pub(super) git_enrichment_policy: GitEnrichmentPolicy,
     pub(super) next_internal_sub_id: AtomicU64,
     pub(crate) idle_epoch: AtomicU64,
-    pub(crate) last_completed_turn_id: Mutex<Option<String>>,
+    pub(crate) last_completed_turn:
+        Mutex<Option<(String, codex_extension_api::AutomaticTurnOrigin)>>,
 }
 
 #[derive(Clone)]
@@ -1161,7 +1162,7 @@ impl Session {
                 git_enrichment_policy,
                 next_internal_sub_id: AtomicU64::new(0),
                 idle_epoch: AtomicU64::new(0),
-                last_completed_turn_id: Mutex::new(None),
+                last_completed_turn: Mutex::new(None),
             });
             if let Some(network_policy_decider_session) = network_policy_decider_session {
                 let mut guard = network_policy_decider_session.write().await;

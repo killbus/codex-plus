@@ -32,6 +32,13 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: clippy, rustfmt
 
+      - uses: taiki-e/install-action@just
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-version: 1.28.1
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: codex-src/codex-rs
@@ -42,6 +49,30 @@ jobs:
 
       - name: Verify provenance and patch chain
         run: python scripts/verify_provenance.py --check --patch patches/goal-old-continuation.patch --patch patches/shadow-mind.patch
+
+      - name: Generate app-server schema fixtures
+        id: generate_app_server_schema
+        working-directory: codex-src/codex-rs
+        run: just write-app-server-schema
+
+      - name: Upload generated app-server schemas
+        if: always() && steps.generate_app_server_schema.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-server-schema-fixtures
+          path: codex-src/codex-rs/app-server-protocol/schema
+
+      - name: Generate Bazel module lock
+        id: generate_bazel_module_lock
+        working-directory: codex-src
+        run: just bazel-lock-update
+
+      - name: Upload generated Bazel module lock
+        if: always() && steps.generate_bazel_module_lock.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bazel-module-lock
+          path: codex-src/MODULE.bazel.lock
 
       - name: Test goal-only compatibility baseline
         run: |
@@ -70,6 +101,14 @@ jobs:
         working-directory: codex-src/codex-rs
         run: cargo test --locked -p codex-shadow-extension
 
+      - name: Test extension item wire contracts
+        working-directory: codex-src/codex-rs
+        run: cargo test --locked -p codex-extension-items
+
+      - name: Test app-server protocol and schema contracts
+        working-directory: codex-src/codex-rs
+        run: cargo test --locked -p codex-app-server-protocol
+
       - name: Test Goal extension
         working-directory: codex-src/codex-rs
         run: cargo test --locked -p codex-goal-extension
@@ -87,8 +126,36 @@ jobs:
 
       - name: Test lifecycle injection contract
         working-directory: codex-src/codex-rs
-        run: cargo test --locked -p codex-core inject_if_running_for_turn --lib
+        run: |
+          cargo test --locked -p codex-core try_start_turn_if_idle --lib
+          cargo test --locked -p codex-core thread_idle --lib
 
-      - name: Lint changed extensions
+      - name: Test Shadow rollout persistence
         working-directory: codex-src/codex-rs
-        run: cargo clippy --locked -p codex-shadow-extension -p codex-goal-extension -p codex-tui --all-targets -- -D warnings
+        run: cargo test --locked -p codex-rollout shadow_report
+
+      - name: Lint affected crates
+        working-directory: codex-src/codex-rs
+        run: >-
+          cargo clippy --locked
+          -p codex-analytics
+          -p codex-app-server-protocol
+          -p codex-core
+          -p codex-extension-api
+          -p codex-extension-items
+          -p codex-goal-extension
+          -p codex-rollout
+          -p codex-shadow-extension
+          -p codex-thread-store
+          -p codex-tui
+          --all-targets -- -D warnings
+
+      - name: Check app-server schema fixture drift
+        if: always()
+        working-directory: codex-src/codex-rs
+        run: git diff --exit-code -- app-server-protocol/schema
+
+      - name: Check Bazel module lock drift
+        if: always()
+        working-directory: codex-src
+        run: git diff --exit-code -- MODULE.bazel.lock

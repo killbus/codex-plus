@@ -3944,6 +3944,7 @@ version = "0.146.0-alpha.3"
 dependencies = [
  "codex-core",
  "codex-extension-api",
+ "codex-extension-items",
  "codex-features",
  "codex-protocol",
  "serde",
@@ -4185,8 +4186,8 @@ dependencies = [
  "codex-plugin",
  "codex-protocol",
  "codex-rollout",
- "codex-shadow-extension",
  "codex-sandboxing",
+ "codex-shadow-extension",
  "codex-shell-command",
  "codex-state",
  "codex-terminal-detection",

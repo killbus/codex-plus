@@ -250,6 +250,19 @@ fn fallback_transcript_cell(item: &ThreadItem) -> Option<PlainHistoryCell> {
         ThreadItem::ContextCompaction { .. } => {
             vec!["context compacted".dim().into()]
         }
+        ThreadItem::ShadowReport(item) => std::iter::once(
+            vec![
+                "Shadow · ".magenta().bold(),
+                item.shadow_name.clone().magenta().bold(),
+            ]
+            .into(),
+        )
+        .chain(
+            item.content
+                .lines()
+                .map(|line| vec!["  ".dim(), line.to_owned().dim()].into()),
+        )
+        .collect(),
         ThreadItem::UserMessage { .. }
         | ThreadItem::AgentMessage { .. }
         | ThreadItem::Plan { .. }

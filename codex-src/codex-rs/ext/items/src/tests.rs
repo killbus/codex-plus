@@ -3,6 +3,7 @@ use serde_json::json;
 
 use super::ExtensionItem;
 use super::image_generation::ImageGenerationItem;
+use super::shadow::ShadowReportItem;
 use super::sleep::SleepItem;
 use super::web_search::WebSearchAction;
 use super::web_search::WebSearchItem;
@@ -99,6 +100,32 @@ fn sleep_item_preserves_stable_wire_shape() {
             "kind": "clock.sleep",
             "id": "sleep-1",
             "durationMs": 1_000,
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<ExtensionItem>(value).expect("deserialize extension item"),
+        item
+    );
+}
+
+#[test]
+fn shadow_report_item_preserves_stable_wire_shape() {
+    let item = ExtensionItem::ShadowReport(ShadowReportItem {
+        id: "shadow-report-1".to_string(),
+        shadow_id: "reviewer".to_string(),
+        shadow_name: "Reviewer".to_string(),
+        content: "Use a typed item.".to_string(),
+    });
+    let value = serde_json::to_value(&item).expect("serialize extension item");
+
+    assert_eq!(
+        value,
+        json!({
+            "kind": "shadow.report",
+            "id": "shadow-report-1",
+            "shadowId": "reviewer",
+            "shadowName": "Reviewer",
+            "content": "Use a typed item.",
         })
     );
     assert_eq!(

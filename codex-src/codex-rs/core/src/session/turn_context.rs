@@ -2,6 +2,7 @@ use super::*;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::shell_snapshot::ShellSnapshotFile;
 use codex_core_skills::HostSkillsSnapshot;
+use codex_extension_api::AutomaticTurnOrigin;
 use codex_file_system::FileSystemSandboxContext;
 use codex_model_provider::SharedModelProvider;
 use codex_model_provider::create_model_provider;
@@ -125,6 +126,7 @@ pub struct TurnContext {
     pub(crate) history_mode: ThreadHistoryMode,
     pub(crate) parent_thread_id: Option<ThreadId>,
     pub(crate) originator: String,
+    pub(crate) automatic_turn_origin: AutomaticTurnOrigin,
     pub(crate) environments: TurnEnvironmentSnapshot,
     /// The session's absolute working directory. All relative paths provided
     /// by the model as well as sandbox policies are resolved against this path
@@ -283,6 +285,7 @@ impl TurnContext {
             history_mode: self.history_mode,
             parent_thread_id: self.parent_thread_id,
             originator: self.originator.clone(),
+            automatic_turn_origin: self.automatic_turn_origin.clone(),
             environments: self.environments.clone(),
             #[allow(deprecated)]
             cwd: self.cwd.clone(),
@@ -561,6 +564,7 @@ impl Session {
             history_mode: session_configuration.history_mode,
             parent_thread_id: session_configuration.parent_thread_id,
             originator: session_configuration.originator.clone(),
+            automatic_turn_origin: AutomaticTurnOrigin::Unspecified,
             environments,
             #[allow(deprecated)]
             cwd,
@@ -658,6 +662,7 @@ impl Session {
                 sub_id,
                 session_configuration,
                 updates.final_output_json_schema,
+                AutomaticTurnOrigin::Unspecified,
             )
             .await)
     }
@@ -667,11 +672,13 @@ impl Session {
         sub_id: String,
         session_configuration: SessionConfiguration,
         final_output_json_schema: Option<Option<Value>>,
+        automatic_turn_origin: AutomaticTurnOrigin,
     ) -> Arc<TurnContext> {
         self.new_turn_context_from_configuration(
             sub_id,
             session_configuration,
             final_output_json_schema,
+            automatic_turn_origin,
             TurnMultiAgentRuntime::ResolveAndStore,
             self.git_enrichment_policy,
         )
@@ -687,6 +694,7 @@ impl Session {
             sub_id,
             session_configuration,
             /*final_output_json_schema*/ None,
+            AutomaticTurnOrigin::Unspecified,
             TurnMultiAgentRuntime::Preview,
             GitEnrichmentPolicy::Skip,
         )
@@ -699,6 +707,7 @@ impl Session {
         sub_id: String,
         session_configuration: SessionConfiguration,
         final_output_json_schema: Option<Option<Value>>,
+        automatic_turn_origin: AutomaticTurnOrigin,
         multi_agent_runtime: TurnMultiAgentRuntime,
         git_enrichment_policy: GitEnrichmentPolicy,
     ) -> Arc<TurnContext> {
@@ -789,6 +798,7 @@ impl Session {
             sub_id,
             skills_snapshot,
         );
+        turn_context.automatic_turn_origin = automatic_turn_origin;
         turn_context.realtime_active = self.conversation.running_state().await.is_some();
 
         if let Some(final_schema) = final_output_json_schema {
@@ -839,6 +849,22 @@ impl Session {
             sub_id,
             session_configuration,
             /*final_output_json_schema*/ None,
+            AutomaticTurnOrigin::Unspecified,
+        )
+        .await
+    }
+
+    pub(crate) async fn new_default_turn_with_sub_id_and_origin(
+        &self,
+        sub_id: String,
+        automatic_turn_origin: AutomaticTurnOrigin,
+    ) -> Arc<TurnContext> {
+        let session_configuration = self.default_turn_configuration().await;
+        self.new_turn_from_configuration(
+            sub_id,
+            session_configuration,
+            /*final_output_json_schema*/ None,
+            automatic_turn_origin,
         )
         .await
     }

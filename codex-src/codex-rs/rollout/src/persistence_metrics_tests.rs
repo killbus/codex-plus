@@ -1,3 +1,5 @@
+use codex_extension_items::ExtensionItem;
+use codex_extension_items::shadow::ShadowReportItem;
 use codex_protocol::ThreadId;
 use codex_protocol::items::EnteredReviewModeItem;
 use codex_protocol::items::ExitedReviewModeItem;
@@ -344,4 +346,29 @@ fn review_mode_persistence_depends_on_history_mode() {
         serde_json::to_value(persisted_paginated).expect("serialize persisted items"),
         serde_json::to_value(completed_items).expect("serialize expected items")
     );
+}
+
+#[test]
+fn shadow_report_completion_is_persisted_in_both_history_modes() {
+    let completed = RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+        thread_id: ThreadId::default(),
+        turn_id: "turn".to_string(),
+        item: TurnItem::Extension(ExtensionItem::ShadowReport(ShadowReportItem {
+            id: "shadow-report-1".to_string(),
+            shadow_id: "reviewer".to_string(),
+            shadow_name: "Reviewer".to_string(),
+            content: "Persist this report.".to_string(),
+        })),
+        completed_at_ms: 0,
+    }));
+
+    for history_mode in [ThreadHistoryMode::Legacy, ThreadHistoryMode::Paginated] {
+        let (persisted, _) =
+            measure_and_filter_rollout_items(std::slice::from_ref(&completed), history_mode);
+        assert_eq!(
+            serde_json::to_value(persisted).expect("serialize persisted items"),
+            serde_json::to_value(std::slice::from_ref(&completed))
+                .expect("serialize expected items")
+        );
+    }
 }

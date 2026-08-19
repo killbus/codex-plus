@@ -1133,6 +1133,32 @@ fn web_search_history_cell_snapshot() {
 }
 
 #[test]
+fn shadow_report_history_cell_snapshot() {
+    let cell = new_shadow_report(
+        "Reviewer".to_string(),
+        "First finding.\nA longer second finding that wraps at the configured width.".to_string(),
+    );
+    let rendered = render_lines(&cell.display_lines(/*width*/ 38)).join("\n");
+
+    insta::assert_snapshot!(rendered, @"Shadow · Reviewer
+  First finding.
+  A longer second finding that wraps
+  at the configured width.");
+}
+
+#[test]
+fn shadow_report_raw_transcript_preserves_identity_and_content() {
+    let cell = new_shadow_report(
+        "Reviewer".to_string(),
+        "First finding.\nSecond finding.".to_string(),
+    );
+
+    insta::assert_snapshot!(render_lines(&cell.raw_lines()).join("\n"), @"Shadow · Reviewer
+First finding.
+Second finding.");
+}
+
+#[test]
 fn standalone_unix_update_available_history_cell_snapshot() {
     let cell =
         UpdateAvailableHistoryCell::new("9.9.9".to_string(), Some(UpdateAction::StandaloneUnix));

@@ -14,6 +14,7 @@ use crate::protocol::item_builders::review_output_text;
 use codex_experimental_api_macros::ExperimentalApi;
 use codex_extension_items::ExtensionItem;
 pub use codex_extension_items::image_generation::ImageGenerationItem;
+pub use codex_extension_items::shadow::ShadowReportItem;
 pub use codex_extension_items::sleep::SleepItem;
 pub use codex_extension_items::web_search::WebSearchAction;
 pub use codex_extension_items::web_search::WebSearchItem;
@@ -370,6 +371,7 @@ pub enum ThreadItem {
         path: LegacyAppPathString,
     },
     Sleep(SleepItem),
+    ShadowReport(ShadowReportItem),
     ImageGeneration(ImageGenerationItem),
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
@@ -429,6 +431,7 @@ impl ThreadItem {
             | ThreadItem::ContextCompaction { id, .. } => id,
             ThreadItem::WebSearch(item) => &item.id,
             ThreadItem::Sleep(item) => &item.id,
+            ThreadItem::ShadowReport(item) => &item.id,
             ThreadItem::ImageGeneration(item) => &item.id,
         }
     }
@@ -905,6 +908,7 @@ impl From<CoreTurnItem> for ThreadItem {
             CoreTurnItem::Extension(extension) => match extension {
                 ExtensionItem::ImageGeneration(item) => ThreadItem::ImageGeneration(item),
                 ExtensionItem::Sleep(item) => ThreadItem::Sleep(item),
+                ExtensionItem::ShadowReport(item) => ThreadItem::ShadowReport(item),
                 ExtensionItem::WebSearch(item) => ThreadItem::WebSearch(item),
             },
             CoreTurnItem::ImageGeneration(image) => {

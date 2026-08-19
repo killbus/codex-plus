@@ -511,7 +511,7 @@ impl Session {
         }
 
         if let Some(turn_context) = turn_context.as_deref() {
-            self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
+            self.emit_turn_abort_lifecycle(reason.clone(), turn_context)
                 .await;
         }
         if let Some(active_turn) = active_turn_to_clear {
@@ -551,7 +551,7 @@ impl Session {
             self.handle_task_abort(task, reason.clone()).await;
         }
         if let Some(turn_context) = turn_context.as_deref() {
-            self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
+            self.emit_turn_abort_lifecycle(reason.clone(), turn_context)
                 .await;
         }
         // Let interrupted tasks observe cancellation before dropping pending approvals, or an
@@ -769,7 +769,7 @@ impl Session {
                 profile: turn_context.turn_timing_state.complete_profile(),
             });
         let event = if let Some(reason) = abort_reason {
-            self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
+            self.emit_turn_abort_lifecycle(reason.clone(), turn_context.as_ref())
                 .await;
             EventMsg::TurnAborted(TurnAbortedEvent {
                 turn_id: Some(turn_context.sub_id.clone()),
@@ -784,8 +784,7 @@ impl Session {
                 .time_to_first_token_ms()
                 .await;
             let error = turn_context.terminal_error.lock().await.clone();
-            self.emit_turn_stop_lifecycle(turn_context.extension_data.as_ref())
-                .await;
+            self.emit_turn_stop_lifecycle(turn_context.as_ref()).await;
             EventMsg::TurnComplete(TurnCompleteEvent {
                 turn_id: turn_context.sub_id.clone(),
                 last_agent_message,

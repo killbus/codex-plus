@@ -2891,6 +2891,30 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         ThreadItem::WebSearch(expected_search_item)
     );
 
+    let shadow_report = codex_extension_items::shadow::ShadowReportItem {
+        id: "shadow-report-1".to_string(),
+        shadow_id: "reviewer".to_string(),
+        shadow_name: "Reviewer".to_string(),
+        content: "Use the typed item boundary.".to_string(),
+    };
+    let shadow_thread_item = ThreadItem::ShadowReport(shadow_report.clone());
+    assert_eq!(
+        ThreadItem::from(TurnItem::Extension(
+            codex_extension_items::ExtensionItem::ShadowReport(shadow_report),
+        )),
+        shadow_thread_item
+    );
+    assert_eq!(
+        serde_json::to_value(shadow_thread_item).expect("serialize shadow report"),
+        json!({
+            "type": "shadowReport",
+            "id": "shadow-report-1",
+            "shadowId": "reviewer",
+            "shadowName": "Reviewer",
+            "content": "Use the typed item boundary.",
+        })
+    );
+
     let image_view_item = TurnItem::ImageView(ImageViewItem {
         id: "view-image-1".to_string(),
         path: PathUri::from_abs_path(&test_path_buf("/tmp/view-image.png").abs()),

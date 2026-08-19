@@ -1,2 +1,4 @@
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "实体模型/调度语义复用 pi-shadow-mind，不重造"}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "shadow 扩展跨内核 extension/TUI 命令/权限层，需要跨层设计判断"}
+{"file": ".trellis/tasks/08-16-shadow-extension/research/shadow-report-lifecycle.md", "reason": "Current hidden-report path, native ExtensionItem boundary, persistence gap, and trusted-origin evidence"}
+{"file": "codex-src/AGENTS.md", "reason": "Rust API, test, TUI snapshot, formatting, and complete-suite rules"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Change crosses extension items, core lifecycle, app-server protocol, rollout, and TUI"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse canonical item lifecycle, persistence, and shared live/replay rendering paths"}

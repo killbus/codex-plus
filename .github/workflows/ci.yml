@@ -37,17 +37,29 @@ jobs:
         working-directory: codex-src/codex-rs
         run: cargo fmt --all -- --check
 
-      - name: Test Shadow runtime concurrency contracts
+      - name: Test idle reservation ownership
         working-directory: codex-src/codex-rs
-        shell: bash
-        run: |
-          status=0
-          cargo test --locked -p codex-core idle_reservation_cannot_be_overwritten_by_concurrent_spawn_task --lib || status=1
-          cargo test --locked -p codex-core pending_work_start_does_not_steal_user_pending_input_after_reservation_replacement --lib || status=1
-          cargo test --locked -p codex-core try_start_turn_if_idle_rejects_in_flight_client_user_input --lib || status=1
-          cargo test --locked -p codex-shadow-extension old_epoch_delivery_worker_cannot_drain_new_epoch_report || status=1
-          cargo test --locked -p codex-shadow-extension cancelled_same_epoch_delivery_worker_cannot_drain_replacement_report || status=1
-          exit "$status"
+        run: cargo test --locked -p codex-core idle_reservation_cannot_be_overwritten_by_concurrent_spawn_task --lib
+
+      - name: Test pending work ownership
+        if: always()
+        working-directory: codex-src/codex-rs
+        run: cargo test --locked -p codex-core pending_work_start_does_not_steal_user_pending_input_after_reservation_replacement --lib
+
+      - name: Test in-flight client input reservation
+        if: always()
+        working-directory: codex-src/codex-rs
+        run: cargo test --locked -p codex-core try_start_turn_if_idle_rejects_in_flight_client_user_input --lib
+
+      - name: Test old epoch report ownership
+        if: always()
+        working-directory: codex-src/codex-rs
+        run: cargo test --locked -p codex-shadow-extension old_epoch_delivery_worker_cannot_drain_new_epoch_report
+
+      - name: Test cancelled epoch report ownership
+        if: always()
+        working-directory: codex-src/codex-rs
+        run: cargo test --locked -p codex-shadow-extension cancelled_same_epoch_delivery_worker_cannot_drain_replacement_report
 
   retry-contracts:
     name: Goal and Guardian retry contracts

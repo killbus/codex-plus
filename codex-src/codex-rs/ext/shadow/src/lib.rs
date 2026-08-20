@@ -218,7 +218,7 @@ pub struct ThreadRuntime {
     next_run_id: AtomicU64,
     scheduled_turn: Mutex<Option<String>>,
     runs: Mutex<BTreeMap<String, RunHandle>>,
-    reports: Mutex<Vec<ShadowReport>>,
+    reports: Mutex<BTreeMap<u64, Vec<ShadowReport>>>,
     delivery_lock: Semaphore,
 }
 
@@ -229,19 +229,21 @@ impl ThreadRuntime {
 
     /// Starts a new user epoch and cancels every old shadow run.
     pub fn begin_user_input(&self) -> u64 {
+        let mut reports = self.reports();
         let epoch = self.epoch.fetch_add(1, Ordering::AcqRel) + 1;
         for run in self.runs().values() {
             run.cancel();
         }
-        self.reports().clear();
+        reports.clear();
         epoch
     }
 
     pub fn cancel_runs(&self) {
+        let mut reports = self.reports();
         for run in self.runs().values() {
             run.cancel();
         }
-        self.reports().clear();
+        reports.clear();
     }
 
     /// The only lifecycle edge allowed to schedule a heartbeat.
@@ -292,12 +294,19 @@ impl ThreadRuntime {
         if active_turn_id != Some(expected_turn_id) {
             return ReportDisposition::WrongTurn;
         }
-        self.reports().push(report);
+        let mut reports = self.reports();
+        if report.epoch != self.epoch() {
+            return ReportDisposition::Stale;
+        }
+        reports.entry(report.epoch).or_default().push(report);
         ReportDisposition::Accepted
     }
 
     pub fn take_reports(&self) -> Vec<ShadowReport> {
         std::mem::take(&mut *self.reports())
+            .into_values()
+            .flatten()
+            .collect()
     }
 
     fn active_run_ids(&self) -> BTreeSet<String> {
@@ -311,16 +320,23 @@ impl ThreadRuntime {
         if report.epoch != expected_epoch || report.epoch != self.epoch() {
             return false;
         }
-        self.reports().push(report);
+        let mut reports = self.reports();
+        if report.epoch != self.epoch() {
+            return false;
+        }
+        reports.entry(report.epoch).or_default().push(report);
         true
     }
 
-    fn take_reports_for_delivery(
-        &self,
-        _run: &RunHandle,
-        _expected_epoch: u64,
-    ) -> Vec<ShadowReport> {
-        std::mem::take(&mut *self.reports())
+    fn take_reports_for_delivery(&self, run: &RunHandle, expected_epoch: u64) -> Vec<ShadowReport> {
+        if run.is_cancelled() || run.epoch != expected_epoch || self.epoch() != expected_epoch {
+            return Vec::new();
+        }
+        let mut reports = self.reports();
+        if run.is_cancelled() || self.epoch() != expected_epoch {
+            return Vec::new();
+        }
+        reports.remove(&expected_epoch).unwrap_or_default()
     }
 
     async fn delivery_permit(&self) -> Result<SemaphorePermit<'_>, tokio::sync::AcquireError> {
@@ -337,7 +353,7 @@ impl ThreadRuntime {
         self.runs.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn reports(&self) -> MutexGuard<'_, Vec<ShadowReport>> {
+    fn reports(&self) -> MutexGuard<'_, BTreeMap<u64, Vec<ShadowReport>>> {
         self.reports.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -349,7 +365,7 @@ impl Default for ThreadRuntime {
             next_run_id: AtomicU64::new(0),
             scheduled_turn: Mutex::new(None),
             runs: Mutex::new(BTreeMap::new()),
-            reports: Mutex::new(Vec::new()),
+            reports: Mutex::new(BTreeMap::new()),
             delivery_lock: Semaphore::new(/*permits*/ 1),
         }
     }
@@ -835,6 +851,10 @@ async fn run_shadow<S>(
         state.runtime.finish_run(&run.run_id);
         return;
     };
+    if run.is_cancelled() || state.runtime.epoch() != expected_epoch {
+        state.runtime.finish_run(&run.run_id);
+        return;
+    }
     let reports = state
         .runtime
         .take_reports_for_delivery(&run, expected_epoch);

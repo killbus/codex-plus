@@ -30,6 +30,10 @@ use codex_protocol::protocol::TokenUsage;
 pub(crate) struct ActiveTurn {
     pub(crate) task: Option<RunningTask>,
     pub(crate) turn_state: Arc<Mutex<TurnState>>,
+    /// Marks an idle turn slot reserved by an automatic delivery before its
+    /// task has been installed. A user submission may reclaim this slot, but
+    /// must not inherit its pending automatic input.
+    pub(crate) idle_reservation: bool,
 }
 
 /// Whether mailbox deliveries should still be folded into the current turn.
@@ -58,6 +62,7 @@ impl Default for ActiveTurn {
         Self {
             task: None,
             turn_state: Arc::new(Mutex::new(TurnState::default())),
+            idle_reservation: false,
         }
     }
 }

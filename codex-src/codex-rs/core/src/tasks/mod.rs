@@ -34,6 +34,7 @@ use crate::session::turn_context::TurnContext;
 use crate::state::ActiveTurn;
 use crate::state::RunningTask;
 use crate::state::TaskKind;
+use crate::state::TurnState;
 use codex_analytics::TurnProfileFact;
 use codex_analytics::TurnTokenUsageFact;
 use codex_login::AuthManager;
@@ -310,7 +311,60 @@ where
     }
 }
 
+enum TaskStartOwnership {
+    Available,
+    PendingWorkReservation(Arc<tokio::sync::Mutex<TurnState>>),
+    IdleReservation(Arc<tokio::sync::Mutex<TurnState>>),
+}
+
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(crate) struct PendingWorkStartTestGate {
+    reached: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+#[cfg(test)]
+impl PendingWorkStartTestGate {
+    pub(crate) async fn wait_until_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+#[cfg(test)]
+static PENDING_WORK_START_TEST_GATES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, PendingWorkStartTestGate>>,
+> = std::sync::LazyLock::new(Default::default);
+
 impl Session {
+    #[cfg(test)]
+    pub(crate) fn install_pending_work_start_test_gate(&self, gate: PendingWorkStartTestGate) {
+        let previous = PENDING_WORK_START_TEST_GATES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(self.thread_id.to_string(), gate);
+        assert!(
+            previous.is_none(),
+            "pending work start test gate already installed"
+        );
+    }
+
+    #[cfg(test)]
+    async fn wait_at_pending_work_start_test_gate(&self) {
+        let gate = PENDING_WORK_START_TEST_GATES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.thread_id.to_string());
+        if let Some(gate) = gate {
+            gate.reached.notify_one();
+            gate.release.notified().await;
+        }
+    }
+
     pub async fn spawn_task<T: SessionTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
@@ -328,6 +382,38 @@ impl Session {
         input: Vec<TurnInput>,
         task: T,
     ) {
+        let installed = self
+            .start_task_with_ownership(turn_context, input, task, TaskStartOwnership::Available)
+            .await;
+        assert!(installed, "available task start lost turn ownership");
+    }
+
+    pub(crate) async fn start_task_for_idle_reservation<T: SessionTask>(
+        self: &Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        task: T,
+        turn_state: Arc<tokio::sync::Mutex<TurnState>>,
+    ) -> bool {
+        self.start_task_with_ownership(
+            turn_context,
+            Vec::new(),
+            task,
+            TaskStartOwnership::IdleReservation(turn_state),
+        )
+        .await
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "turn ownership must remain locked through lifecycle setup and task installation"
+    )]
+    async fn start_task_with_ownership<T: SessionTask>(
+        self: &Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        input: Vec<TurnInput>,
+        task: T,
+        ownership: TaskStartOwnership,
+    ) -> bool {
         let task: Arc<dyn AnySessionTask> = Arc::new(task);
         let task_kind = task.kind();
         let span_name = task.span_name();
@@ -350,13 +436,88 @@ impl Session {
             .await
             .clear_turn(&turn_context.sub_id);
 
-        let pending_items = self.input_queue.get_pending_input(&self.active_turn).await;
-        let turn_state = {
-            let mut active = self.active_turn.lock().await;
-            let turn = active.get_or_insert_with(ActiveTurn::default);
-            debug_assert!(turn.task.is_none());
-            Arc::clone(&turn.turn_state)
+        // A pending-work reservation keeps the active-turn guard until its task is installed.
+        // This makes the ownership check, pending-input extraction, and installation one handoff.
+        let pending_work_active_turn = match &ownership {
+            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
+                let active = self.active_turn.lock().await;
+                let Some(turn) = active.as_ref() else {
+                    return false;
+                };
+                if turn.idle_reservation
+                    || turn.task.is_some()
+                    || !Arc::ptr_eq(&turn.turn_state, expected_turn_state)
+                {
+                    return false;
+                }
+                Some(active)
+            }
+            TaskStartOwnership::Available | TaskStartOwnership::IdleReservation(_) => None,
         };
+        let pending_items = match &ownership {
+            TaskStartOwnership::Available => {
+                self.input_queue.get_pending_input(&self.active_turn).await
+            }
+            TaskStartOwnership::IdleReservation(_) => Vec::new(),
+            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
+                let accepts_mailbox_delivery = expected_turn_state
+                    .lock()
+                    .await
+                    .accepts_mailbox_delivery_for_current_turn();
+                if !accepts_mailbox_delivery {
+                    Vec::new()
+                } else {
+                    let mut pending_items = self
+                        .input_queue
+                        .take_pending_input_for_turn_state(expected_turn_state.as_ref())
+                        .await;
+                    pending_items.extend(self.input_queue.drain_mailbox_input_items().await);
+                    pending_items
+                }
+            }
+        };
+        let mut active = match pending_work_active_turn {
+            Some(active) => active,
+            None => self.active_turn.lock().await,
+        };
+        let turn = match &ownership {
+            TaskStartOwnership::Available => active.get_or_insert_with(ActiveTurn::default),
+            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
+                let Some(turn) = active.as_mut() else {
+                    return false;
+                };
+                if turn.idle_reservation
+                    || turn.task.is_some()
+                    || !Arc::ptr_eq(&turn.turn_state, expected_turn_state)
+                {
+                    return false;
+                }
+                turn
+            }
+            TaskStartOwnership::IdleReservation(expected_turn_state) => {
+                let Some(turn) = active.as_mut() else {
+                    return false;
+                };
+                if self
+                    .client_input_reservations
+                    .load(std::sync::atomic::Ordering::Acquire)
+                    != 0
+                    || !turn.idle_reservation
+                    || turn.task.is_some()
+                    || !Arc::ptr_eq(&turn.turn_state, expected_turn_state)
+                {
+                    return false;
+                }
+                turn
+            }
+        };
+        assert!(turn.task.is_none(), "cannot overwrite an installed task");
+        assert!(
+            !matches!(&ownership, TaskStartOwnership::Available) || !turn.idle_reservation,
+            "cannot claim an automatic idle reservation as an unreserved task"
+        );
+        turn.idle_reservation = false;
+        let turn_state = Arc::clone(&turn.turn_state);
         turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
         self.input_queue
             .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
@@ -365,9 +526,6 @@ impl Session {
             .await;
 
         let turn_extension_data = Arc::clone(&turn_context.extension_data);
-        let mut active = self.active_turn.lock().await;
-        let turn = active.get_or_insert_with(ActiveTurn::default);
-        debug_assert!(turn.task.is_none());
         let agent_execution_guard = self.services.agent_control.execution_guard(
             turn_context.multi_agent_version,
             &turn_context.session_source,
@@ -449,6 +607,7 @@ impl Session {
             _timer: timer,
         };
         turn.task = Some(running_task);
+        true
     }
 
     /// Starts a regular turn when the session is idle and pending work is waiting.
@@ -479,18 +638,29 @@ impl Session {
             return;
         }
 
-        {
+        let turn_state = {
             let mut active_turn = self.active_turn.lock().await;
             if active_turn.is_some() {
                 return;
             }
-            *active_turn = Some(ActiveTurn::default());
-        }
+            let reservation = ActiveTurn::default();
+            let turn_state = Arc::clone(&reservation.turn_state);
+            *active_turn = Some(reservation);
+            turn_state
+        };
 
         let turn_context = self.new_default_turn_with_sub_id(sub_id).await;
         self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
             .await;
-        self.start_task(turn_context, Vec::new(), RegularTask::new())
+        #[cfg(test)]
+        self.wait_at_pending_work_start_test_gate().await;
+        let _installed = self
+            .start_task_with_ownership(
+                turn_context,
+                Vec::new(),
+                RegularTask::new(),
+                TaskStartOwnership::PendingWorkReservation(turn_state),
+            )
             .await;
     }
 

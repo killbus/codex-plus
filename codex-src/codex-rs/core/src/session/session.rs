@@ -46,6 +46,9 @@ pub(crate) struct Session {
     pub(crate) services: SessionServices,
     pub(super) git_enrichment_policy: GitEnrichmentPolicy,
     pub(super) next_internal_sub_id: AtomicU64,
+    /// Client user-input handlers that have entered the session but have not
+    /// yet committed their steer or replacement turn.
+    pub(crate) client_input_reservations: AtomicU64,
     pub(crate) idle_epoch: AtomicU64,
     pub(crate) last_completed_turn:
         Mutex<Option<(String, codex_extension_api::AutomaticTurnOrigin)>>,
@@ -1161,6 +1164,7 @@ impl Session {
                 services,
                 git_enrichment_policy,
                 next_internal_sub_id: AtomicU64::new(0),
+                client_input_reservations: AtomicU64::new(0),
                 idle_epoch: AtomicU64::new(0),
                 last_completed_turn: Mutex::new(None),
             });

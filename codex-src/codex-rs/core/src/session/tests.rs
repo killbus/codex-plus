@@ -80,6 +80,7 @@ use crate::connectors::AppInfo;
 use crate::rollout::recorder::RolloutRecorder;
 use crate::state::ActiveTurn;
 use crate::state::TaskKind;
+use crate::tasks::PendingWorkStartTestGate;
 use crate::tasks::SessionTask;
 use crate::tasks::SessionTaskContext;
 use crate::tasks::SessionTaskResult;
@@ -5578,6 +5579,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         services,
         git_enrichment_policy: GitEnrichmentPolicy::Fresh,
         next_internal_sub_id: AtomicU64::new(0),
+        client_input_reservations: AtomicU64::new(0),
         idle_epoch: AtomicU64::new(0),
         last_completed_turn: Mutex::new(None),
     };
@@ -7742,6 +7744,7 @@ where
         services,
         git_enrichment_policy: GitEnrichmentPolicy::Fresh,
         next_internal_sub_id: AtomicU64::new(0),
+        client_input_reservations: AtomicU64::new(0),
         idle_epoch: AtomicU64::new(0),
         last_completed_turn: Mutex::new(None),
     });
@@ -10306,6 +10309,104 @@ async fn idle_reservation_cannot_be_overwritten_by_concurrent_spawn_task() {
 }
 
 #[tokio::test]
+async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_replacement() {
+    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
+    let trigger_communication = InterAgentCommunication::new(
+        AgentPath::root(),
+        AgentPath::root(),
+        Vec::new(),
+        "pending trigger work".to_owned(),
+        /*trigger_turn*/ true,
+    );
+    sess.input_queue
+        .enqueue_mailbox_communication(trigger_communication.clone())
+        .await;
+
+    let gate = PendingWorkStartTestGate::default();
+    sess.install_pending_work_start_test_gate(gate.clone());
+    let pending_work_session = Arc::clone(&sess);
+    let pending_work_start = tokio::spawn(async move {
+        pending_work_session
+            .maybe_start_turn_for_pending_work_with_sub_id("pending-work".to_owned())
+            .await;
+    });
+
+    timeout(StdDuration::from_secs(2), gate.wait_until_reached())
+        .await
+        .expect("pending-work startup should reserve before installation");
+
+    let user_turn = sess
+        .new_default_turn_with_sub_id("user-replacement".to_owned())
+        .await;
+    sess.spawn_task(
+        Arc::clone(&user_turn),
+        Vec::new(),
+        NeverEndingTask {
+            kind: TaskKind::Regular,
+            listen_to_cancellation_token: true,
+        },
+    )
+    .await;
+    sess.steer_input(
+        vec![UserInput::Text {
+            text: "user pending input".to_owned(),
+            text_elements: Vec::new(),
+        }],
+        /*additional_context*/ Default::default(),
+        Some(&user_turn.sub_id),
+        /*client_user_message_id*/ None,
+        /*responsesapi_client_metadata*/ None,
+    )
+    .await
+    .expect("replacement user turn should accept pending input");
+
+    gate.release();
+    timeout(StdDuration::from_secs(2), pending_work_start)
+        .await
+        .expect("stale pending-work starter should finish")
+        .expect("stale pending-work starter must not panic");
+
+    let active_turn = sess
+        .active_turn
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|active_turn| active_turn.task.as_ref())
+        .map(|task| {
+            (
+                task.turn_context.sub_id.clone(),
+                task.turn_context.automatic_turn_origin.clone(),
+            )
+        });
+    assert_eq!(
+        active_turn,
+        Some((user_turn.sub_id.clone(), AutomaticTurnOrigin::Unspecified,))
+    );
+
+    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
+    let [
+        TurnInput::UserInput { content, client_id },
+        TurnInput::InterAgentCommunication(actual_trigger_communication),
+    ] = pending_input.as_slice()
+    else {
+        panic!("expected user pending input followed by trigger communication");
+    };
+    assert_eq!(
+        (content, client_id),
+        (
+            &vec![UserInput::Text {
+                text: "user pending input".to_owned(),
+                text_elements: Vec::new(),
+            }],
+            &None,
+        )
+    );
+    assert_eq!(actual_trigger_communication, &trigger_communication);
+
+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+}
+
+#[tokio::test]
 async fn try_start_turn_if_idle_rejects_in_flight_client_user_input() {
     let (sess, _tc, rx) = make_session_and_context_with_rx().await;
     let gate = super::handlers::ClientInputEntryTestGate::default();
@@ -10406,6 +10507,77 @@ async fn steer_input_requires_active_turn() {
         .expect_err("steering without active turn should fail");
 
     assert!(matches!(err, SteerInputError::NoActiveTurn(_)));
+}
+
+#[tokio::test]
+async fn steer_input_suppresses_only_shadow_automatic_turns() {
+    for origin in [
+        AutomaticTurnOrigin::Extension("goal".to_owned()),
+        AutomaticTurnOrigin::Extension("future-extension".to_owned()),
+    ] {
+        let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
+        let turn_context = sess
+            .new_default_turn_with_sub_id_and_origin("automatic-turn".to_owned(), origin)
+            .await;
+        sess.spawn_task(
+            Arc::clone(&turn_context),
+            Vec::new(),
+            NeverEndingTask {
+                kind: TaskKind::Regular,
+                listen_to_cancellation_token: true,
+            },
+        )
+        .await;
+
+        let active_turn_id = sess
+            .steer_input(
+                vec![UserInput::Text {
+                    text: "steer non-Shadow extension".to_owned(),
+                    text_elements: Vec::new(),
+                }],
+                /*additional_context*/ Default::default(),
+                Some(&turn_context.sub_id),
+                /*client_user_message_id*/ None,
+                /*responsesapi_client_metadata*/ None,
+            )
+            .await
+            .expect("non-Shadow automatic turns should remain steerable");
+        assert_eq!(active_turn_id, turn_context.sub_id);
+        sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    }
+
+    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
+    let shadow_turn = sess
+        .new_default_turn_with_sub_id_and_origin(
+            "shadow-turn".to_owned(),
+            AutomaticTurnOrigin::Extension("shadow".to_owned()),
+        )
+        .await;
+    sess.spawn_task(
+        Arc::clone(&shadow_turn),
+        Vec::new(),
+        NeverEndingTask {
+            kind: TaskKind::Regular,
+            listen_to_cancellation_token: true,
+        },
+    )
+    .await;
+
+    let err = sess
+        .steer_input(
+            vec![UserInput::Text {
+                text: "do not steer Shadow".to_owned(),
+                text_elements: Vec::new(),
+            }],
+            /*additional_context*/ Default::default(),
+            Some(&shadow_turn.sub_id),
+            /*client_user_message_id*/ None,
+            /*responsesapi_client_metadata*/ None,
+        )
+        .await
+        .expect_err("Shadow automatic turns should reject steering");
+    assert!(matches!(err, SteerInputError::NoActiveTurn(_)));
+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }
 
 #[tokio::test]

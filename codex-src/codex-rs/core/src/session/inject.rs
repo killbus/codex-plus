@@ -173,6 +173,12 @@ impl Session {
         if input.is_empty() {
             return Ok(());
         }
+        if self.client_input_reservations.load(Ordering::Acquire) != 0 {
+            return Err(TryStartTurnIfIdleError::new(
+                TryStartTurnIfIdleRejectionReason::Busy,
+                input,
+            ));
+        }
         if self.input_queue.has_trigger_turn_mailbox_items().await {
             return Err(TryStartTurnIfIdleError::new(
                 TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
@@ -202,8 +208,19 @@ impl Session {
                     input,
                 ));
             }
-            let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
-            Arc::clone(&active_turn.turn_state)
+            if self.client_input_reservations.load(Ordering::Acquire) != 0 {
+                return Err(TryStartTurnIfIdleError::new(
+                    TryStartTurnIfIdleRejectionReason::Busy,
+                    input,
+                ));
+            }
+            let reservation = ActiveTurn {
+                idle_reservation: true,
+                ..Default::default()
+            };
+            let turn_state = Arc::clone(&reservation.turn_state);
+            *active_turn = Some(reservation);
+            turn_state
         };
 
         if self.input_queue.has_trigger_turn_mailbox_items().await {
@@ -242,7 +259,9 @@ impl Session {
         let still_reserved = {
             let active_turn = self.active_turn.lock().await;
             active_turn.as_ref().is_some_and(|active_turn| {
-                active_turn.task.is_none() && Arc::ptr_eq(&active_turn.turn_state, &turn_state)
+                active_turn.idle_reservation
+                    && active_turn.task.is_none()
+                    && Arc::ptr_eq(&active_turn.turn_state, &turn_state)
             })
         };
         if !still_reserved {
@@ -253,6 +272,7 @@ impl Session {
             ));
         }
 
+        let rejected_input = input.clone();
         let mut pending_input = Vec::with_capacity(display_items.len() + input.len());
         pending_input.extend(
             display_items
@@ -265,14 +285,30 @@ impl Session {
             .await;
         #[cfg(test)]
         self.wait_at_idle_start_test_gate().await;
-        self.start_task(turn_context, Vec::new(), RegularTask::new())
-            .await;
+        if !self
+            .start_task_for_idle_reservation(
+                turn_context,
+                RegularTask::new(),
+                Arc::clone(&turn_state),
+            )
+            .await
+        {
+            self.input_queue
+                .take_pending_input_for_turn_state(turn_state.as_ref())
+                .await;
+            self.clear_reserved_idle_turn(&turn_state).await;
+            return Err(TryStartTurnIfIdleError::new(
+                TryStartTurnIfIdleRejectionReason::Busy,
+                rejected_input,
+            ));
+        }
         Ok(())
     }
 
     async fn clear_reserved_idle_turn(&self, turn_state: &Arc<tokio::sync::Mutex<TurnState>>) {
         let mut active_turn_guard = self.active_turn.lock().await;
         if let Some(active_turn) = active_turn_guard.as_ref()
+            && active_turn.idle_reservation
             && active_turn.task.is_none()
             && Arc::ptr_eq(&active_turn.turn_state, turn_state)
         {

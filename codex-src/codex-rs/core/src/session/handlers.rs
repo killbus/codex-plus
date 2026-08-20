@@ -59,6 +59,29 @@ use tracing::debug;
 use tracing::info;
 use tracing::warn;
 
+struct ClientInputReservation<'a> {
+    session: &'a Session,
+}
+
+impl<'a> ClientInputReservation<'a> {
+    fn enter(session: &'a Session) -> Self {
+        session
+            .client_input_reservations
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Self { session }
+    }
+}
+
+impl Drop for ClientInputReservation<'_> {
+    fn drop(&mut self) {
+        let previous = self
+            .session
+            .client_input_reservations
+            .fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+        assert!(previous > 0, "client input reservation underflow");
+    }
+}
+
 #[cfg(test)]
 #[derive(Clone, Default)]
 pub(super) struct ClientInputEntryTestGate {
@@ -228,6 +251,7 @@ pub(super) async fn user_input_or_turn_inner(
     op: Op,
     client_user_message_id: Option<String>,
 ) {
+    let _client_input_reservation = ClientInputReservation::enter(sess);
     let Op::UserInput {
         items,
         final_output_json_schema,

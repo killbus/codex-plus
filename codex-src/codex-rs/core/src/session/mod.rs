@@ -3877,6 +3877,13 @@ impl Session {
         let Some(active_task) = active_turn.task.as_ref() else {
             return Err(SteerInputError::NoActiveTurn(input));
         };
+        if active_task
+            .turn_context
+            .automatic_turn_origin
+            .is_extension("shadow")
+        {
+            return Err(SteerInputError::NoActiveTurn(input));
+        }
         let active_turn_id = &active_task.turn_context.sub_id;
 
         if let Some(expected_turn_id) = expected_turn_id

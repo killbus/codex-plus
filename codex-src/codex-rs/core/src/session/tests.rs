@@ -80,6 +80,7 @@ use crate::connectors::AppInfo;
 use crate::rollout::recorder::RolloutRecorder;
 use crate::state::ActiveTurn;
 use crate::state::TaskKind;
+use crate::tasks::PendingWorkStartTestGate;
 use crate::tasks::SessionTask;
 use crate::tasks::SessionTaskContext;
 use crate::tasks::SessionTaskResult;
@@ -10300,6 +10301,98 @@ async fn idle_reservation_cannot_be_overwritten_by_concurrent_spawn_task() {
     assert!(
         !sess.input_queue.has_pending_input(&sess.active_turn).await,
         "rejected Shadow work must not be transferred into the user turn"
+    );
+
+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+}
+
+#[tokio::test]
+async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_replacement() {
+    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
+    sess.input_queue
+        .enqueue_mailbox_communication(InterAgentCommunication::new(
+            AgentPath::root(),
+            AgentPath::root(),
+            Vec::new(),
+            "pending trigger work".to_owned(),
+            /*trigger_turn*/ true,
+        ))
+        .await;
+
+    let gate = PendingWorkStartTestGate::default();
+    sess.install_pending_work_start_test_gate(gate.clone());
+    let pending_work_session = Arc::clone(&sess);
+    let pending_work_start = tokio::spawn(async move {
+        pending_work_session
+            .maybe_start_turn_for_pending_work_with_sub_id("pending-work".to_owned())
+            .await;
+    });
+
+    timeout(StdDuration::from_secs(2), gate.wait_until_reached())
+        .await
+        .expect("pending-work startup should reserve before installation");
+
+    let user_turn = sess
+        .new_default_turn_with_sub_id("user-replacement".to_owned())
+        .await;
+    sess.spawn_task(
+        Arc::clone(&user_turn),
+        Vec::new(),
+        NeverEndingTask {
+            kind: TaskKind::Regular,
+            listen_to_cancellation_token: true,
+        },
+    )
+    .await;
+    sess.steer_input(
+        vec![UserInput::Text {
+            text: "user pending input".to_owned(),
+            text_elements: Vec::new(),
+        }],
+        /*additional_context*/ Default::default(),
+        Some(&user_turn.sub_id),
+        /*client_user_message_id*/ None,
+        /*responsesapi_client_metadata*/ None,
+    )
+    .await
+    .expect("replacement user turn should accept pending input");
+
+    gate.release();
+    timeout(StdDuration::from_secs(2), pending_work_start)
+        .await
+        .expect("stale pending-work starter should finish")
+        .expect("stale pending-work starter must not panic");
+
+    let active_turn = sess
+        .active_turn
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|active_turn| active_turn.task.as_ref())
+        .map(|task| {
+            (
+                task.turn_context.sub_id.clone(),
+                task.turn_context.automatic_turn_origin.clone(),
+            )
+        });
+    assert_eq!(
+        active_turn,
+        Some((user_turn.sub_id.clone(), AutomaticTurnOrigin::Unspecified,))
+    );
+
+    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
+    assert!(
+        pending_input.iter().any(|input| {
+            matches!(
+                input,
+                TurnInput::UserInput { content, .. }
+                    if content.iter().any(|item| matches!(
+                        item,
+                        UserInput::Text { text, .. } if text == "user pending input"
+                    ))
+            )
+        }),
+        "stale pending-work startup must not drain user pending input"
     );
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;

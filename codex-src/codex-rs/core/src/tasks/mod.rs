@@ -310,7 +310,54 @@ where
     }
 }
 
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(crate) struct PendingWorkStartTestGate {
+    reached: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+#[cfg(test)]
+impl PendingWorkStartTestGate {
+    pub(crate) async fn wait_until_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+#[cfg(test)]
+static PENDING_WORK_START_TEST_GATES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, PendingWorkStartTestGate>>,
+> = std::sync::LazyLock::new(Default::default);
+
 impl Session {
+    #[cfg(test)]
+    pub(crate) fn install_pending_work_start_test_gate(&self, gate: PendingWorkStartTestGate) {
+        let previous = PENDING_WORK_START_TEST_GATES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(self.thread_id.to_string(), gate);
+        assert!(
+            previous.is_none(),
+            "pending work start test gate already installed"
+        );
+    }
+
+    #[cfg(test)]
+    async fn wait_at_pending_work_start_test_gate(&self) {
+        let gate = PENDING_WORK_START_TEST_GATES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.thread_id.to_string());
+        if let Some(gate) = gate {
+            gate.reached.notify_one();
+            gate.release.notified().await;
+        }
+    }
+
     pub async fn spawn_task<T: SessionTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
@@ -490,6 +537,8 @@ impl Session {
         let turn_context = self.new_default_turn_with_sub_id(sub_id).await;
         self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
             .await;
+        #[cfg(test)]
+        self.wait_at_pending_work_start_test_gate().await;
         self.start_task(turn_context, Vec::new(), RegularTask::new())
             .await;
     }

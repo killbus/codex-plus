@@ -37,6 +37,10 @@ jobs:
         working-directory: codex-src/codex-rs
         run: cargo fmt --all -- --check
 
+      - name: Compile pending work ownership contract
+        working-directory: codex-src/codex-rs
+        run: cargo test --locked -p codex-core pending_work_start_does_not_steal_user_pending_input_after_reservation_replacement --lib --no-run
+
       - name: Test pending work ownership contract
         working-directory: codex-src/codex-rs
         run: cargo test --locked -p codex-core pending_work_start_does_not_steal_user_pending_input_after_reservation_replacement --lib

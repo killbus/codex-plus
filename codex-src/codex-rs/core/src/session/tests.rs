@@ -10384,24 +10384,39 @@ async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_
     );
 
     let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
-    let [
-        TurnInput::UserInput { content, client_id },
-        TurnInput::InterAgentCommunication(actual_trigger_communication),
-    ] = pending_input.as_slice()
-    else {
-        panic!("expected user pending input followed by trigger communication");
-    };
     assert_eq!(
-        (content, client_id),
-        (
+        pending_input.len(),
+        2,
+        "replacement turn should retain exactly the user input and trigger communication"
+    );
+    let user_pending_input = pending_input.iter().find_map(|input| match input {
+        TurnInput::UserInput { content, client_id } => Some((content, client_id)),
+        TurnInput::DisplayItem(_)
+        | TurnInput::ResponseItem(_)
+        | TurnInput::InterAgentCommunication(_) => None,
+    });
+    assert_eq!(
+        user_pending_input,
+        Some((
             &vec![UserInput::Text {
                 text: "user pending input".to_owned(),
                 text_elements: Vec::new(),
             }],
             &None,
-        )
+        )),
+        "stale pending-work startup must not drain user pending input"
     );
-    assert_eq!(actual_trigger_communication, &trigger_communication);
+    let pending_trigger_communication = pending_input.iter().find_map(|input| match input {
+        TurnInput::InterAgentCommunication(communication) => Some(communication),
+        TurnInput::UserInput { .. } | TurnInput::DisplayItem(_) | TurnInput::ResponseItem(_) => {
+            None
+        }
+    });
+    assert_eq!(
+        pending_trigger_communication,
+        Some(&trigger_communication),
+        "stale pending-work startup must not drain trigger mailbox input"
+    );
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }

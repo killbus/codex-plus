@@ -1137,7 +1137,7 @@ index 10fa319f62fc3aba05d019586f593b06f91cd595..3dd82cf00af7daab193737d9eb9efa0e
            options: StartThreadOptions|
            -> AgentSpawnFuture<'static, NewThread, CodexErr> {
 diff --git a/codex-rs/app-server/tests/suite/v2/thread_resume.rs b/codex-rs/app-server/tests/suite/v2/thread_resume.rs
-index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..f8773afec1ef0290baded09ba059f415a5366736 100644
+index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e2221d79d 100644
 --- a/codex-rs/app-server/tests/suite/v2/thread_resume.rs
 +++ b/codex-rs/app-server/tests/suite/v2/thread_resume.rs
 @@ -56,9 +56,11 @@ use codex_app_server_protocol::ThreadStartParams;
@@ -1161,7 +1161,7 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..f8773afec1ef0290baded09ba059f415
  use pretty_assertions::assert_eq;
  use serde_json::json;
  use std::fs::FileTimes;
-@@ -1839,6 +1843,126 @@ async fn thread_goal_set_edits_objective_without_resetting_usage() -> Result<()>
+@@ -1839,6 +1843,286 @@ async fn thread_goal_set_edits_objective_without_resetting_usage() -> Result<()>
      Ok(())
  }
  
@@ -1285,6 +1285,166 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..f8773afec1ef0290baded09ba059f415
 +    Ok(())
 +}
 +
++#[tokio::test]
++async fn transient_http_goal_turn_errors_start_next_automatic_turn_with_shadow() -> Result<()> {
++    for (status, expected_error) in [
++        (
++            429,
++            codex_app_server_protocol::CodexErrorInfo::ResponseTooManyFailedAttempts {
++                http_status_code: Some(429),
++            },
++        ),
++        (
++            500,
++            codex_app_server_protocol::CodexErrorInfo::InternalServerError,
++        ),
++    ] {
++        run_transient_http_goal_turn_error(status, expected_error).await?;
++    }
++    Ok(())
++}
++
++async fn run_transient_http_goal_turn_error(
++    status: u16,
++    expected_error: codex_app_server_protocol::CodexErrorInfo,
++) -> Result<()> {
++    let server = responses::start_mock_server().await;
++    let create_goal = responses::sse(vec![
++        responses::ev_response_created("create-goal"),
++        responses::ev_function_call(
++            "call-create-goal",
++            "create_goal",
++            r#"{"objective":"finish the transient HTTP lifecycle test"}"#,
++        ),
++        responses::ev_completed("create-goal"),
++    ]);
++    let complete_goal = responses::sse(vec![
++        responses::ev_response_created("complete-goal"),
++        responses::ev_function_call(
++            "call-complete-goal",
++            "update_goal",
++            r#"{"status":"complete"}"#,
++        ),
++        responses::ev_completed("complete-goal"),
++    ]);
++    let done = create_final_assistant_message_sse_response("Done")?;
++    let transient_error = ResponseTemplate::new(status).set_body_json(json!({
++        "error": {
++            "type": "rate_limit_exceeded",
++            "message": format!("synthetic transient HTTP {status}"),
++        }
++    }));
++    responses::mount_response_sequence(
++        &server,
++        vec![
++            responses::sse_response(create_goal),
++            transient_error,
++            responses::sse_response(complete_goal),
++            responses::sse_response(done),
++        ],
++    )
++    .await;
++
++    let codex_home = TempDir::new()?;
++    mock_responses_config(&server.uri())
++        .enable_feature(Feature::Goals)
++        .enable_feature(Feature::Shadow)
++        .with_provider_config("supports_websockets = false")
++        .write(codex_home.path())?;
++    let mut mcp = TestAppServer::builder()
++        .with_codex_home(codex_home.path())
++        .without_managed_config()
++        .build_initialized()
++        .await?;
++
++    let ThreadStartResponse { thread, .. } = mcp
++        .start_thread(ThreadStartParams {
++            model: Some("gpt-5.2-codex".to_string()),
++            ..Default::default()
++        })
++        .await?;
++    let TurnStartResponse { turn } = mcp
++        .request(
++            |request_id| codex_app_server_protocol::ClientRequest::TurnStart {
++                request_id,
++                params: TurnStartParams {
++                    thread_id: thread.id.clone(),
++                    input: vec![UserInput::Text {
++                        text: "create a goal and survive a transient HTTP failure".to_string(),
++                        text_elements: Vec::new(),
++                    }],
++                    ..Default::default()
++                },
++            },
++        )
++        .await?;
++
++    let failed: TurnCompletedNotification = timeout(
++        DEFAULT_READ_TIMEOUT,
++        mcp.read_notification("turn/completed"),
++    )
++    .await??;
++    assert_eq!(failed.turn.id, turn.id);
++    assert_eq!(failed.turn.status, TurnStatus::Failed);
++    assert_eq!(
++        failed
++            .turn
++            .error
++            .as_ref()
++            .and_then(|error| error.codex_error_info.clone()),
++        Some(expected_error)
++    );
++
++    let continued_notification = timeout(
++        DEFAULT_READ_TIMEOUT,
++        mcp.read_stream_until_matching_notification(
++            "next automatic turn/started after transient HTTP error",
++            |notification| {
++                notification.method == "turn/started"
++                    && notification
++                        .params
++                        .as_ref()
++                        .and_then(|params| params.get("turn"))
++                        .and_then(|turn| turn.get("id"))
++                        .and_then(serde_json::Value::as_str)
++                        .is_some_and(|turn_id| turn_id != turn.id)
++            },
++        ),
++    )
++    .await??;
++    let continued: TurnStartedNotification =
++        serde_json::from_value(continued_notification.params.expect("turn/started params"))?;
++    assert_eq!(continued.thread_id, thread.id);
++    assert_ne!(continued.turn.id, turn.id);
++
++    let get_id = mcp
++        .send_raw_request("thread/goal/get", Some(json!({ "threadId": thread.id })))
++        .await?;
++    let persisted: codex_app_server_protocol::ThreadGoalGetResponse =
++        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(get_id)).await??;
++    assert_eq!(
++        persisted.goal.expect("goal should remain persisted").status,
++        ThreadGoalStatus::Active
++    );
++
++    let completed: TurnCompletedNotification = timeout(
++        DEFAULT_READ_TIMEOUT,
++        mcp.read_notification("turn/completed"),
++    )
++    .await??;
++    assert_eq!(completed.turn.id, continued.turn.id);
++    assert_eq!(completed.turn.status, TurnStatus::Completed);
++    assert_eq!(
++        server
++            .received_requests()
++            .await
++            .expect("mock server should retain received requests")
++            .len(),
++        4
++    );
++    Ok(())
++}
++
  #[tokio::test]
  async fn thread_goal_lifecycle_emits_analytics_and_clear_deletes_goal() -> Result<()> {
      let server = create_mock_responses_server_sequence_unchecked(vec![
@@ -1371,6 +1531,117 @@ index 6eba281d5b3bbb1660db5581d64a35549a706331..8edb6970b50215cbf45b2e75d55d1926
      pub async fn set_app_server_client_info(
          &self,
          app_server_client_name: Option<String>,
+diff --git a/codex-rs/core/src/guardian/review.rs b/codex-rs/core/src/guardian/review.rs
+index 9db4bac06d8011d8b127868e4f61feb1bfbcbb36..4d188289618fb01915c619c9324a4436db644e21 100644
+--- a/codex-rs/core/src/guardian/review.rs
++++ b/codex-rs/core/src/guardian/review.rs
+@@ -920,6 +920,7 @@ fn should_retry_guardian_review(outcome: &GuardianReviewOutcome) -> bool {
+             GuardianReviewError::Session {
+                 error_info: Some(
+                     CodexErrorInfo::ServerOverloaded
++                        | CodexErrorInfo::ResponseTooManyFailedAttempts { .. }
+                         | CodexErrorInfo::HttpConnectionFailed { .. }
+                         | CodexErrorInfo::ResponseStreamConnectionFailed { .. }
+                         | CodexErrorInfo::InternalServerError
+@@ -975,6 +976,9 @@ mod review_tests {
+         };
+         let transient_error_info = [
+             CodexErrorInfo::ServerOverloaded,
++            CodexErrorInfo::ResponseTooManyFailedAttempts {
++                http_status_code: Some(429),
++            },
+             CodexErrorInfo::HttpConnectionFailed {
+                 http_status_code: Some(502),
+             },
+@@ -1019,6 +1023,13 @@ mod review_tests {
+                 )),
+                 false,
+             ),
++            (
++                GuardianReviewOutcome::Error(GuardianReviewError::session_with_error_info(
++                    anyhow::anyhow!("hard usage limit"),
++                    CodexErrorInfo::UsageLimitExceeded,
++                )),
++                false,
++            ),
+             (
+                 GuardianReviewOutcome::Error(GuardianReviewError::parse(anyhow::anyhow!("parse"))),
+                 true,
+diff --git a/codex-rs/core/src/guardian/tests.rs b/codex-rs/core/src/guardian/tests.rs
+index f376f3bf623dc5332315cf0a0dfcf9fe81c0c7c1..55793205703586f373c9a30c51bf12d08f00e910 100644
+--- a/codex-rs/core/src/guardian/tests.rs
++++ b/codex-rs/core/src/guardian/tests.rs
+@@ -2443,6 +2443,70 @@ async fn guardian_review_retries_transient_session_failure_then_approves() -> an
+     Ok(())
+ }
+ 
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn guardian_review_retries_http_429_then_approves() -> anyhow::Result<()> {
++    skip_if_no_network!(Ok(()));
++
++    let server = start_mock_server().await;
++    let rate_limit = || {
++        wiremock::ResponseTemplate::new(429).set_body_json(serde_json::json!({
++            "error": {
++                "type": "rate_limit_exceeded",
++                "message": "temporary reviewer rate limit",
++            }
++        }))
++    };
++    let approval = serde_json::json!({
++        "risk_level": "low",
++        "user_authorization": "high",
++        "outcome": "allow",
++        "rationale": "rate limit retry succeeded",
++    })
++    .to_string();
++    let request_log = mount_response_sequence(
++        &server,
++        vec![
++            rate_limit(),
++            rate_limit(),
++            core_test_support::responses::sse_response(sse(vec![
++                ev_response_created("resp-rate-limit-approved"),
++                ev_assistant_message("msg-rate-limit-approved", &approval),
++                ev_completed("resp-rate-limit-approved"),
++            ])),
++        ],
++    )
++    .await;
++    let (session, turn) = guardian_test_session_and_turn(&server).await;
++    seed_guardian_parent_history(&session, &turn).await;
++
++    let (outcome, metadata) = run_guardian_review_session_for_test(
++        Arc::clone(&session),
++        Arc::clone(&turn),
++        guardian_shell_request("shell-rate-limit-retry"),
++        /*retry_reason*/ None,
++        guardian_output_schema(),
++        /*external_cancel*/ None,
++        /*max_attempts*/ 3,
++    )
++    .await;
++
++    let GuardianReviewOutcome::Completed(assessment) = outcome else {
++        panic!("expected guardian assessment after retrying HTTP 429");
++    };
++    assert_eq!(assessment.outcome, GuardianAssessmentOutcome::Allow);
++    assert_eq!(assessment.rationale, "rate limit retry succeeded");
++    // A generic HTTP 429 is terminal at the sampling-request layer as
++    // `CodexErr::RetryLimit`; each response therefore exhausts one Guardian
++    // session attempt before the bounded Guardian loop retries the review.
++    assert_eq!(metadata.attempt_count, 3);
++    assert!(matches!(
++        metadata.guardian_session_kind,
++        Some(codex_analytics::GuardianReviewSessionKind::TrunkReused)
++    ));
++    assert_eq!(request_log.requests().len(), 3);
++    Ok(())
++}
++
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+ async fn guardian_review_does_not_retry_missing_assessment_payload() -> anyhow::Result<()> {
+     skip_if_no_network!(Ok(()));
 diff --git a/codex-rs/core/src/hook_runtime.rs b/codex-rs/core/src/hook_runtime.rs
 index c9fe099332b7ec68ca892d6366cdf3155519b96a..2ae4d77def702175db897799370cbd3933fd1e67 100644
 --- a/codex-rs/core/src/hook_runtime.rs
@@ -1395,11 +1666,110 @@ index c9fe099332b7ec68ca892d6366cdf3155519b96a..2ae4d77def702175db897799370cbd39
          TurnInput::ResponseItem(item) => {
              sess.record_conversation_items(turn_context, std::slice::from_ref(&item))
                  .await;
+diff --git a/codex-rs/core/src/session/handlers.rs b/codex-rs/core/src/session/handlers.rs
+index 23d24c3f5ce5faa8dd8175ab0e26469d2d4ed1a6..90e38543ad8bd74c58f118ea64ef5ba38d606807 100644
+--- a/codex-rs/core/src/session/handlers.rs
++++ b/codex-rs/core/src/session/handlers.rs
+@@ -59,6 +59,77 @@ use tracing::debug;
+ use tracing::info;
+ use tracing::warn;
+ 
++struct ClientInputReservation<'a> {
++    session: &'a Session,
++}
++
++impl<'a> ClientInputReservation<'a> {
++    fn enter(session: &'a Session) -> Self {
++        session
++            .client_input_reservations
++            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
++        Self { session }
++    }
++}
++
++impl Drop for ClientInputReservation<'_> {
++    fn drop(&mut self) {
++        let previous = self
++            .session
++            .client_input_reservations
++            .fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
++        assert!(previous > 0, "client input reservation underflow");
++    }
++}
++
++#[cfg(test)]
++#[derive(Clone, Default)]
++pub(super) struct ClientInputEntryTestGate {
++    reached: Arc<tokio::sync::Notify>,
++    release: Arc<tokio::sync::Notify>,
++}
++
++#[cfg(test)]
++impl ClientInputEntryTestGate {
++    pub(super) async fn wait_until_reached(&self) {
++        self.reached.notified().await;
++    }
++
++    pub(super) fn release(&self) {
++        self.release.notify_one();
++    }
++}
++
++#[cfg(test)]
++static CLIENT_INPUT_ENTRY_TEST_GATES: std::sync::LazyLock<
++    std::sync::Mutex<std::collections::HashMap<String, ClientInputEntryTestGate>>,
++> = std::sync::LazyLock::new(Default::default);
++
++#[cfg(test)]
++impl Session {
++    pub(super) fn install_client_input_entry_test_gate(&self, gate: ClientInputEntryTestGate) {
++        let previous = CLIENT_INPUT_ENTRY_TEST_GATES
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .insert(self.thread_id.to_string(), gate);
++        assert!(
++            previous.is_none(),
++            "client input entry test gate already installed"
++        );
++    }
++
++    async fn wait_at_client_input_entry_test_gate(&self) {
++        let gate = CLIENT_INPUT_ENTRY_TEST_GATES
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .remove(&self.thread_id.to_string());
++        if let Some(gate) = gate {
++            gate.reached.notify_one();
++            gate.release.notified().await;
++        }
++    }
++}
++
+ pub async fn interrupt(sess: &Arc<Session>) {
+     sess.interrupt_task().await;
+ }
+@@ -180,6 +251,7 @@ pub(super) async fn user_input_or_turn_inner(
+     op: Op,
+     client_user_message_id: Option<String>,
+ ) {
++    let _client_input_reservation = ClientInputReservation::enter(sess);
+     let Op::UserInput {
+         items,
+         final_output_json_schema,
+@@ -190,6 +262,8 @@ pub(super) async fn user_input_or_turn_inner(
+     else {
+         unreachable!();
+     };
++    #[cfg(test)]
++    sess.wait_at_client_input_entry_test_gate().await;
+     let emit_thread_settings_applied = thread_settings != ThreadSettingsOverrides::default();
+     let mut updates = if emit_thread_settings_applied {
+         thread_settings_update(sess, thread_settings).await
 diff --git a/codex-rs/core/src/session/inject.rs b/codex-rs/core/src/session/inject.rs
-index 3e086964c391d899f927fbf7cce8f141c6517aa9..5394f135038590c2f0afc355e7aee253b45dd477 100644
+index 3e086964c391d899f927fbf7cce8f141c6517aa9..6ba97954fb1bdb583bc5e7b4fd1ef86af5f86e22 100644
 --- a/codex-rs/core/src/session/inject.rs
 +++ b/codex-rs/core/src/session/inject.rs
-@@ -6,9 +6,12 @@ use crate::codex_thread::TryStartTurnIfIdleRejectionReason;
+@@ -6,11 +6,58 @@ use crate::codex_thread::TryStartTurnIfIdleRejectionReason;
  use crate::state::ActiveTurn;
  use crate::state::TurnState;
  use crate::tasks::RegularTask;
@@ -1409,10 +1779,56 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..5394f135038590c2f0afc355e7aee253
  use codex_protocol::models::ResponseItem;
  use std::sync::Arc;
 +use std::sync::atomic::Ordering;
++
++#[cfg(test)]
++#[derive(Clone, Default)]
++pub(super) struct IdleStartTestGate {
++    reached: Arc<tokio::sync::Notify>,
++    release: Arc<tokio::sync::Notify>,
++}
++
++#[cfg(test)]
++impl IdleStartTestGate {
++    pub(super) async fn wait_until_reached(&self) {
++        self.reached.notified().await;
++    }
++
++    pub(super) fn release(&self) {
++        self.release.notify_one();
++    }
++}
++
++#[cfg(test)]
++static IDLE_START_TEST_GATES: std::sync::LazyLock<
++    std::sync::Mutex<std::collections::HashMap<String, IdleStartTestGate>>,
++> = std::sync::LazyLock::new(Default::default);
  
  impl Session {
++    #[cfg(test)]
++    pub(super) fn install_idle_start_test_gate(&self, gate: IdleStartTestGate) {
++        let previous = IDLE_START_TEST_GATES
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .insert(self.thread_id.to_string(), gate);
++        assert!(previous.is_none(), "idle start test gate already installed");
++    }
++
++    #[cfg(test)]
++    async fn wait_at_idle_start_test_gate(&self) {
++        let gate = IDLE_START_TEST_GATES
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .remove(&self.thread_id.to_string());
++        if let Some(gate) = gate {
++            gate.reached.notify_one();
++            gate.release.notified().await;
++        }
++    }
++
      /// Returns the input if there is no active turn to inject into.
-@@ -35,6 +38,37 @@ impl Session {
+     #[expect(
+         clippy::await_holding_invalid_type,
+@@ -35,6 +82,37 @@ impl Session {
          }
      }
  
@@ -1450,7 +1866,7 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..5394f135038590c2f0afc355e7aee253
      /// Starts a regular turn with the provided items only if automatic idle work
      /// is allowed for the current session state.
      ///
-@@ -45,6 +79,52 @@ impl Session {
+@@ -45,10 +123,62 @@ impl Session {
      pub(crate) async fn try_start_turn_if_idle(
          self: &Arc<Self>,
          input: Vec<ResponseItem>,
@@ -1503,7 +1919,17 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..5394f135038590c2f0afc355e7aee253
      ) -> Result<(), TryStartTurnIfIdleError> {
          if input.is_empty() {
              return Ok(());
-@@ -64,6 +144,14 @@ impl Session {
+         }
++        if self.client_input_reservations.load(Ordering::Acquire) != 0 {
++            return Err(TryStartTurnIfIdleError::new(
++                TryStartTurnIfIdleRejectionReason::Busy,
++                input,
++            ));
++        }
+         if self.input_queue.has_trigger_turn_mailbox_items().await {
+             return Err(TryStartTurnIfIdleError::new(
+                 TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
+@@ -64,14 +194,33 @@ impl Session {
  
          let turn_state = {
              let mut active_turn = self.active_turn.lock().await;
@@ -1518,7 +1944,28 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..5394f135038590c2f0afc355e7aee253
              if active_turn.is_some() {
                  return Err(TryStartTurnIfIdleError::new(
                      TryStartTurnIfIdleRejectionReason::Busy,
-@@ -84,7 +172,10 @@ impl Session {
+                     input,
+                 ));
+             }
+-            let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
+-            Arc::clone(&active_turn.turn_state)
++            if self.client_input_reservations.load(Ordering::Acquire) != 0 {
++                return Err(TryStartTurnIfIdleError::new(
++                    TryStartTurnIfIdleRejectionReason::Busy,
++                    input,
++                ));
++            }
++            let reservation = ActiveTurn {
++                idle_reservation: true,
++                ..Default::default()
++            };
++            let turn_state = Arc::clone(&reservation.turn_state);
++            *active_turn = Some(reservation);
++            turn_state
+         };
+ 
+         if self.input_queue.has_trigger_turn_mailbox_items().await {
+@@ -84,7 +233,10 @@ impl Session {
          }
  
          let turn_context = self
@@ -1530,10 +1977,22 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..5394f135038590c2f0afc355e7aee253
              .await;
          if turn_context.mode == ModeKind::Plan {
              self.clear_reserved_idle_turn(&turn_state).await;
-@@ -118,11 +209,15 @@ impl Session {
+@@ -107,7 +259,9 @@ impl Session {
+         let still_reserved = {
+             let active_turn = self.active_turn.lock().await;
+             active_turn.as_ref().is_some_and(|active_turn| {
+-                active_turn.task.is_none() && Arc::ptr_eq(&active_turn.turn_state, &turn_state)
++                active_turn.idle_reservation
++                    && active_turn.task.is_none()
++                    && Arc::ptr_eq(&active_turn.turn_state, &turn_state)
+             })
+         };
+         if !still_reserved {
+@@ -118,20 +272,43 @@ impl Session {
              ));
          }
  
++        let rejected_input = input.clone();
 +        let mut pending_input = Vec::with_capacity(display_items.len() + input.len());
 +        pending_input.extend(
 +            display_items
@@ -1546,10 +2005,39 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..5394f135038590c2f0afc355e7aee253
 -                turn_state.as_ref(),
 -                input.into_iter().map(TurnInput::ResponseItem).collect(),
 -            )
+-            .await;
+-        self.start_task(turn_context, Vec::new(), RegularTask::new())
 +            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_input)
              .await;
-         self.start_task(turn_context, Vec::new(), RegularTask::new())
-             .await;
++        #[cfg(test)]
++        self.wait_at_idle_start_test_gate().await;
++        if !self
++            .start_task_for_idle_reservation(
++                turn_context,
++                RegularTask::new(),
++                Arc::clone(&turn_state),
++            )
++            .await
++        {
++            self.input_queue
++                .take_pending_input_for_turn_state(turn_state.as_ref())
++                .await;
++            self.clear_reserved_idle_turn(&turn_state).await;
++            return Err(TryStartTurnIfIdleError::new(
++                TryStartTurnIfIdleRejectionReason::Busy,
++                rejected_input,
++            ));
++        }
+         Ok(())
+     }
+ 
+     async fn clear_reserved_idle_turn(&self, turn_state: &Arc<tokio::sync::Mutex<TurnState>>) {
+         let mut active_turn_guard = self.active_turn.lock().await;
+         if let Some(active_turn) = active_turn_guard.as_ref()
++            && active_turn.idle_reservation
+             && active_turn.task.is_none()
+             && Arc::ptr_eq(&active_turn.turn_state, turn_state)
+         {
 diff --git a/codex-rs/core/src/session/input_queue.rs b/codex-rs/core/src/session/input_queue.rs
 index 3992f44d4af9d397ad9daf228e0213c4642e82cd..c58c7069c61b9cff8e8b2af2c13a4b93d9eb962d 100644
 --- a/codex-rs/core/src/session/input_queue.rs
@@ -1601,6 +2089,24 @@ index 3992f44d4af9d397ad9daf228e0213c4642e82cd..c58c7069c61b9cff8e8b2af2c13a4b93
          assert!(!input_queue.has_pending_mailbox_items().await);
      }
  
+diff --git a/codex-rs/core/src/session/mod.rs b/codex-rs/core/src/session/mod.rs
+index 5fc6c628d9b292f8b4ab869778e67b56ffa56ba6..ee5ed4e8ed7946e17909ca902ea3bbfff17e70a5 100644
+--- a/codex-rs/core/src/session/mod.rs
++++ b/codex-rs/core/src/session/mod.rs
+@@ -3877,6 +3877,13 @@ impl Session {
+         let Some(active_task) = active_turn.task.as_ref() else {
+             return Err(SteerInputError::NoActiveTurn(input));
+         };
++        if active_task
++            .turn_context
++            .automatic_turn_origin
++            .is_extension("shadow")
++        {
++            return Err(SteerInputError::NoActiveTurn(input));
++        }
+         let active_turn_id = &active_task.turn_context.sub_id;
+ 
+         if let Some(expected_turn_id) = expected_turn_id
 diff --git a/codex-rs/core/src/session/review.rs b/codex-rs/core/src/session/review.rs
 index 9a89c1beeb5c79c35fd2cc05736e3a510c48fd00..80cdd80ba6a3f650e4cb9329e4df831c4251d0ec 100644
 --- a/codex-rs/core/src/session/review.rs
@@ -1614,20 +2120,23 @@ index 9a89c1beeb5c79c35fd2cc05736e3a510c48fd00..80cdd80ba6a3f650e4cb9329e4df831c
          available_models,
          unified_exec_shell_mode,
 diff --git a/codex-rs/core/src/session/session.rs b/codex-rs/core/src/session/session.rs
-index 910ade583bd94917fa4b784e0ab8b15eae0e688b..fa909eef4b08f85f9a71ad6376dd9498114be4ae 100644
+index 910ade583bd94917fa4b784e0ab8b15eae0e688b..6a56478eb7dd3b8249f3452a2d1979ebd76e0e05 100644
 --- a/codex-rs/core/src/session/session.rs
 +++ b/codex-rs/core/src/session/session.rs
-@@ -46,6 +46,9 @@ pub(crate) struct Session {
+@@ -46,6 +46,12 @@ pub(crate) struct Session {
      pub(crate) services: SessionServices,
      pub(super) git_enrichment_policy: GitEnrichmentPolicy,
      pub(super) next_internal_sub_id: AtomicU64,
++    /// Client user-input handlers that have entered the session but have not
++    /// yet committed their steer or replacement turn.
++    pub(crate) client_input_reservations: AtomicU64,
 +    pub(crate) idle_epoch: AtomicU64,
 +    pub(crate) last_completed_turn:
 +        Mutex<Option<(String, codex_extension_api::AutomaticTurnOrigin)>>,
  }
  
  #[derive(Clone)]
-@@ -472,6 +475,11 @@ impl Session {
+@@ -472,6 +478,11 @@ impl Session {
          state.session_configuration.originator.clone()
      }
  
@@ -1639,17 +2148,18 @@ index 910ade583bd94917fa4b784e0ab8b15eae0e688b..fa909eef4b08f85f9a71ad6376dd9498
      #[instrument(name = "session_init", level = "info", skip_all)]
      #[allow(clippy::too_many_arguments)]
      pub(crate) async fn new(
-@@ -1153,6 +1161,8 @@ impl Session {
+@@ -1153,6 +1164,9 @@ impl Session {
                  services,
                  git_enrichment_policy,
                  next_internal_sub_id: AtomicU64::new(0),
++                client_input_reservations: AtomicU64::new(0),
 +                idle_epoch: AtomicU64::new(0),
 +                last_completed_turn: Mutex::new(None),
              });
              if let Some(network_policy_decider_session) = network_policy_decider_session {
                  let mut guard = network_policy_decider_session.write().await;
 diff --git a/codex-rs/core/src/session/tests.rs b/codex-rs/core/src/session/tests.rs
-index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9eba3023e2 100644
+index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e2310482ea37 100644
 --- a/codex-rs/core/src/session/tests.rs
 +++ b/codex-rs/core/src/session/tests.rs
 @@ -33,6 +33,9 @@ use codex_config::types::ToolSuggestDisabledTool;
@@ -1662,7 +2172,15 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
  use codex_features::Feature;
  use codex_http_client::HttpClientFactory;
  use codex_http_client::OutboundProxyPolicy;
-@@ -227,6 +230,43 @@ fn user_message(text: &str) -> ResponseItem {
+@@ -77,6 +80,7 @@ use crate::connectors::AppInfo;
+ use crate::rollout::recorder::RolloutRecorder;
+ use crate::state::ActiveTurn;
+ use crate::state::TaskKind;
++use crate::tasks::PendingWorkStartTestGate;
+ use crate::tasks::SessionTask;
+ use crate::tasks::SessionTaskContext;
+ use crate::tasks::SessionTaskResult;
+@@ -227,6 +231,43 @@ fn user_message(text: &str) -> ResponseItem {
      }
  }
  
@@ -1706,25 +2224,27 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
  #[test]
  fn assign_missing_response_item_ids_assigns_agent_message_ids() {
      let items = Cow::Owned(vec![
-@@ -5538,6 +5578,8 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
+@@ -5538,6 +5579,9 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
          services,
          git_enrichment_policy: GitEnrichmentPolicy::Fresh,
          next_internal_sub_id: AtomicU64::new(0),
++        client_input_reservations: AtomicU64::new(0),
 +        idle_epoch: AtomicU64::new(0),
 +        last_completed_turn: Mutex::new(None),
      };
  
      (session, turn_context)
-@@ -7700,6 +7742,8 @@ where
+@@ -7700,6 +7744,9 @@ where
          services,
          git_enrichment_policy: GitEnrichmentPolicy::Fresh,
          next_internal_sub_id: AtomicU64::new(0),
++        client_input_reservations: AtomicU64::new(0),
 +        idle_epoch: AtomicU64::new(0),
 +        last_completed_turn: Mutex::new(None),
      });
  
      (session, turn_context, rx_event)
-@@ -9919,7 +9963,7 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
+@@ -9919,7 +9966,7 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
  
  #[tokio::test]
  async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
@@ -1733,7 +2253,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
      sess.spawn_task(
          Arc::clone(&tc),
          Vec::new(),
-@@ -9931,17 +9975,26 @@ async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
+@@ -9931,17 +9978,26 @@ async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
      .await;
  
      let item = user_message("synthetic idle input");
@@ -1764,7 +2284,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
  
      sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
  }
-@@ -9965,15 +10018,17 @@ async fn try_start_turn_if_idle_rejects_plan_mode_without_injecting() {
+@@ -9965,15 +10021,17 @@ async fn try_start_turn_if_idle_rejects_plan_mode_without_injecting() {
      assert_eq!(TryStartTurnIfIdleRejectionReason::PlanMode, err.reason());
      assert_eq!(vec![item], err.into_input());
      assert!(sess.active_turn.lock().await.is_none());
@@ -1786,7 +2306,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
      sess.input_queue
          .enqueue_mailbox_communication(InterAgentCommunication::new(
              AgentPath::root(),
-@@ -9985,8 +10040,14 @@ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting()
+@@ -9985,8 +10043,14 @@ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting()
          .await;
  
      let item = user_message("synthetic idle input");
@@ -1802,7 +2322,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
          .await
          .expect_err("pending trigger-turn mail should reject automatic idle input");
  
-@@ -9997,6 +10058,7 @@ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting()
+@@ -9997,6 +10061,7 @@ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting()
      assert_eq!(vec![item], err.into_input());
      assert!(sess.active_turn.lock().await.is_none());
      assert!(sess.input_queue.has_trigger_turn_mailbox_items().await);
@@ -1810,7 +2330,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
  }
  
  #[tokio::test]
-@@ -10020,14 +10082,143 @@ async fn try_start_turn_if_idle_rejects_active_review_turn_without_injecting() {
+@@ -10020,11 +10085,420 @@ async fn try_start_turn_if_idle_rejects_active_review_turn_without_injecting() {
  
      assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, err.reason());
      assert_eq!(vec![item], err.into_input());
@@ -1838,23 +2358,21 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
 +    .await;
 +
 +    let item = user_message("shadow report");
-     assert_eq!(
--        Vec::<TurnInput>::new(),
--        sess.input_queue.get_pending_input(&sess.active_turn).await
++    assert_eq!(
 +        Err(vec![item.clone()]),
 +        sess.inject_if_running_for_turn("wrong-turn", vec![item.clone()])
 +            .await
-     );
++    );
 +    assert!(
 +        sess.inject_if_running_for_turn(&tc.sub_id, vec![item])
 +            .await
 +            .is_ok()
 +    );
 +    assert!(sess.input_queue.has_pending_input(&sess.active_turn).await);
- 
-     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
- }
- 
++
++    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
++}
++
 +#[tokio::test]
 +async fn try_start_turn_if_idle_for_epoch_rejects_stale_epoch() {
 +    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
@@ -1905,11 +2423,13 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
 +        .as_ref()
 +        .and_then(|active_turn| active_turn.task.as_ref())
 +        .map(|task| task.turn_context.automatic_turn_origin.clone());
-+    assert_eq!(
+     assert_eq!(
+-        Vec::<TurnInput>::new(),
+-        sess.input_queue.get_pending_input(&sess.active_turn).await
 +        active_origin,
 +        Some(AutomaticTurnOrigin::Extension("shadow".to_owned()))
-+    );
-+
+     );
+ 
 +    let duplicate = sess
 +        .try_start_turn_if_idle_for_epoch_with_origin(
 +            sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire),
@@ -1953,10 +2473,365 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
 +    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 +}
 +
++#[tokio::test]
++async fn idle_reservation_cannot_be_overwritten_by_concurrent_spawn_task() {
++    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
++    let user_turn = sess
++        .new_default_turn_with_sub_id("concurrent-user-turn".to_owned())
++        .await;
++    let gate = super::inject::IdleStartTestGate::default();
++    sess.install_idle_start_test_gate(gate.clone());
++    let idle_epoch = sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire);
++    let idle_session = Arc::clone(&sess);
++    let idle_start = tokio::spawn(async move {
++        idle_session
++            .try_start_turn_if_idle_for_epoch_with_origin(
++                idle_epoch,
++                AutomaticTurnOrigin::Extension("shadow".to_owned()),
++                vec![shadow_report_turn_item("shadow-reservation-race")],
++                vec![user_message("shadow report")],
++            )
++            .await
++    });
++
++    tokio::time::timeout(StdDuration::from_secs(2), gate.wait_until_reached())
++        .await
++        .expect("idle start should reserve the turn before task installation");
++    let reserved_turn_state = {
++        let active_turn = sess.active_turn.lock().await;
++        let active_turn = active_turn
++            .as_ref()
++            .expect("idle start should leave an owned reservation");
++        assert!(active_turn.task.is_none());
++        Arc::clone(&active_turn.turn_state)
++    };
++    sess.spawn_task(
++        Arc::clone(&user_turn),
++        vec![TurnInput::UserInput {
++            content: vec![UserInput::Text {
++                text: "concurrent user input".to_owned(),
++                text_elements: Vec::new(),
++            }],
++            client_id: None,
++        }],
++        NeverEndingTask {
++            kind: TaskKind::Regular,
++            listen_to_cancellation_token: true,
++        },
++    )
++    .await;
++    gate.release();
++
++    let idle_error = tokio::time::timeout(StdDuration::from_secs(2), idle_start)
++        .await
++        .expect("idle start should finish after the test gate opens")
++        .expect("idle start must not panic when reservation ownership changes")
++        .expect_err("concurrent user task should retain ownership");
++    assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, idle_error.reason());
++    let active_turn = sess
++        .active_turn
++        .lock()
++        .await
++        .as_ref()
++        .and_then(|active_turn| active_turn.task.as_ref())
++        .map(|task| {
++            (
++                task.turn_context.sub_id.clone(),
++                task.turn_context.automatic_turn_origin.clone(),
++            )
++        });
++    assert_eq!(
++        active_turn,
++        Some((user_turn.sub_id.clone(), AutomaticTurnOrigin::Unspecified,))
++    );
++    assert!(
++        sess.input_queue
++            .take_pending_input_for_turn_state(reserved_turn_state.as_ref())
++            .await
++            .is_empty(),
++        "rejected Shadow work must not remain queued on the detached reservation"
++    );
++    assert!(
++        !sess.input_queue.has_pending_input(&sess.active_turn).await,
++        "rejected Shadow work must not be transferred into the user turn"
++    );
++
++    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
++}
++
++#[tokio::test]
++async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_replacement() {
++    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
++    let trigger_communication = InterAgentCommunication::new(
++        AgentPath::root(),
++        AgentPath::root(),
++        Vec::new(),
++        "pending trigger work".to_owned(),
++        /*trigger_turn*/ true,
++    );
++    sess.input_queue
++        .enqueue_mailbox_communication(trigger_communication.clone())
++        .await;
++
++    let gate = PendingWorkStartTestGate::default();
++    sess.install_pending_work_start_test_gate(gate.clone());
++    let pending_work_session = Arc::clone(&sess);
++    let pending_work_start = tokio::spawn(async move {
++        pending_work_session
++            .maybe_start_turn_for_pending_work_with_sub_id("pending-work".to_owned())
++            .await;
++    });
++
++    timeout(StdDuration::from_secs(2), gate.wait_until_reached())
++        .await
++        .expect("pending-work startup should reserve before installation");
++
++    let user_turn = sess
++        .new_default_turn_with_sub_id("user-replacement".to_owned())
++        .await;
++    sess.spawn_task(
++        Arc::clone(&user_turn),
++        Vec::new(),
++        NeverEndingTask {
++            kind: TaskKind::Regular,
++            listen_to_cancellation_token: true,
++        },
++    )
++    .await;
++    sess.steer_input(
++        vec![UserInput::Text {
++            text: "user pending input".to_owned(),
++            text_elements: Vec::new(),
++        }],
++        /*additional_context*/ Default::default(),
++        Some(&user_turn.sub_id),
++        /*client_user_message_id*/ None,
++        /*responsesapi_client_metadata*/ None,
++    )
++    .await
++    .expect("replacement user turn should accept pending input");
++
++    gate.release();
++    timeout(StdDuration::from_secs(2), pending_work_start)
++        .await
++        .expect("stale pending-work starter should finish")
++        .expect("stale pending-work starter must not panic");
++
++    let active_turn = sess
++        .active_turn
++        .lock()
++        .await
++        .as_ref()
++        .and_then(|active_turn| active_turn.task.as_ref())
++        .map(|task| {
++            (
++                task.turn_context.sub_id.clone(),
++                task.turn_context.automatic_turn_origin.clone(),
++            )
++        });
++    assert_eq!(
++        active_turn,
++        Some((user_turn.sub_id.clone(), AutomaticTurnOrigin::Unspecified,))
++    );
++
++    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
++    assert_eq!(
++        pending_input.len(),
++        2,
++        "replacement turn should retain exactly the user input and trigger communication"
++    );
++    let user_pending_input = pending_input.iter().find_map(|input| match input {
++        TurnInput::UserInput { content, client_id } => Some((content, client_id)),
++        TurnInput::DisplayItem(_)
++        | TurnInput::ResponseItem(_)
++        | TurnInput::InterAgentCommunication(_) => None,
++    });
++    assert_eq!(
++        user_pending_input,
++        Some((
++            &vec![UserInput::Text {
++                text: "user pending input".to_owned(),
++                text_elements: Vec::new(),
++            }],
++            &None,
++        )),
++        "stale pending-work startup must not drain user pending input"
++    );
++    let pending_trigger_communication = pending_input.iter().find_map(|input| match input {
++        TurnInput::InterAgentCommunication(communication) => Some(communication),
++        TurnInput::UserInput { .. } | TurnInput::DisplayItem(_) | TurnInput::ResponseItem(_) => {
++            None
++        }
++    });
++    assert_eq!(
++        pending_trigger_communication,
++        Some(&trigger_communication),
++        "stale pending-work startup must not drain trigger mailbox input"
++    );
++
++    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
++}
++
++#[tokio::test]
++async fn try_start_turn_if_idle_rejects_in_flight_client_user_input() {
++    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
++    let gate = super::handlers::ClientInputEntryTestGate::default();
++    sess.install_client_input_entry_test_gate(gate.clone());
++    let idle_epoch = sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire);
++    let user_session = Arc::clone(&sess);
++    let user_input = tokio::spawn(async move {
++        handlers::user_input_or_turn_inner(
++            &user_session,
++            "in-flight-user-turn".to_owned(),
++            Op::UserInput {
++                items: vec![UserInput::Text {
++                    text: "client input already entered".to_owned(),
++                    text_elements: Vec::new(),
++                }],
++                final_output_json_schema: None,
++                responsesapi_client_metadata: None,
++                additional_context: Default::default(),
++                thread_settings: Default::default(),
++            },
++            /*client_user_message_id*/ None,
++        )
++        .await;
++    });
++
++    tokio::time::timeout(StdDuration::from_secs(2), gate.wait_until_reached())
++        .await
++        .expect("client input should reach the entry gate");
++    let shadow_start = sess
++        .try_start_turn_if_idle_for_epoch_with_origin(
++            idle_epoch,
++            AutomaticTurnOrigin::Extension("shadow".to_owned()),
++            vec![shadow_report_turn_item("shadow-client-race")],
++            vec![user_message("shadow report")],
++        )
++        .await;
++    assert!(
++        shadow_start.is_err(),
++        "Shadow must not start after real client work has entered the session"
++    );
++
++    gate.release();
++    tokio::time::timeout(StdDuration::from_secs(2), user_input)
++        .await
++        .expect("client input handler should finish after the test gate opens")
++        .expect("client input handler should not panic");
++    let active_turn = sess
++        .active_turn
++        .lock()
++        .await
++        .as_ref()
++        .and_then(|active_turn| active_turn.task.as_ref())
++        .map(|task| {
++            (
++                task.turn_context.sub_id.clone(),
++                task.turn_context.automatic_turn_origin.clone(),
++            )
++        });
++    let active_or_completed_turn = match active_turn {
++        Some(active_turn) => active_turn,
++        None => {
++            let terminal = recv_terminal_event(&rx, TerminalEventKind::TurnComplete).await;
++            assert_eq!(terminal.id, "in-flight-user-turn");
++            sess.last_completed_turn
++                .lock()
++                .await
++                .clone()
++                .expect("completed user turn should record its origin")
++        }
++    };
++    assert_eq!(
++        active_or_completed_turn,
++        (
++            "in-flight-user-turn".to_owned(),
++            AutomaticTurnOrigin::Unspecified,
++        )
++    );
+     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+ }
+ 
+@@ -10050,6 +10524,77 @@ async fn steer_input_requires_active_turn() {
+     assert!(matches!(err, SteerInputError::NoActiveTurn(_)));
+ }
+ 
++#[tokio::test]
++async fn steer_input_suppresses_only_shadow_automatic_turns() {
++    for origin in [
++        AutomaticTurnOrigin::Extension("goal".to_owned()),
++        AutomaticTurnOrigin::Extension("future-extension".to_owned()),
++    ] {
++        let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
++        let turn_context = sess
++            .new_default_turn_with_sub_id_and_origin("automatic-turn".to_owned(), origin)
++            .await;
++        sess.spawn_task(
++            Arc::clone(&turn_context),
++            Vec::new(),
++            NeverEndingTask {
++                kind: TaskKind::Regular,
++                listen_to_cancellation_token: true,
++            },
++        )
++        .await;
++
++        let active_turn_id = sess
++            .steer_input(
++                vec![UserInput::Text {
++                    text: "steer non-Shadow extension".to_owned(),
++                    text_elements: Vec::new(),
++                }],
++                /*additional_context*/ Default::default(),
++                Some(&turn_context.sub_id),
++                /*client_user_message_id*/ None,
++                /*responsesapi_client_metadata*/ None,
++            )
++            .await
++            .expect("non-Shadow automatic turns should remain steerable");
++        assert_eq!(active_turn_id, turn_context.sub_id);
++        sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
++    }
++
++    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
++    let shadow_turn = sess
++        .new_default_turn_with_sub_id_and_origin(
++            "shadow-turn".to_owned(),
++            AutomaticTurnOrigin::Extension("shadow".to_owned()),
++        )
++        .await;
++    sess.spawn_task(
++        Arc::clone(&shadow_turn),
++        Vec::new(),
++        NeverEndingTask {
++            kind: TaskKind::Regular,
++            listen_to_cancellation_token: true,
++        },
++    )
++    .await;
++
++    let err = sess
++        .steer_input(
++            vec![UserInput::Text {
++                text: "do not steer Shadow".to_owned(),
++                text_elements: Vec::new(),
++            }],
++            /*additional_context*/ Default::default(),
++            Some(&shadow_turn.sub_id),
++            /*client_user_message_id*/ None,
++            /*responsesapi_client_metadata*/ None,
++        )
++        .await
++        .expect_err("Shadow automatic turns should reject steering");
++    assert!(matches!(err, SteerInputError::NoActiveTurn(_)));
++    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
++}
++
  #[tokio::test]
- async fn steer_input_requires_active_turn() {
-     let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
-@@ -10208,12 +10399,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
+ async fn steer_input_enforces_expected_turn_id() {
+     let (sess, tc, _rx) = make_session_and_context_with_rx().await;
+@@ -10208,12 +10753,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
      sess.abort_all_tasks(TurnAbortReason::Replaced).await;
  
      assert!(sess.active_turn.lock().await.is_none());
@@ -1977,7 +2852,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
  }
  
  async fn set_total_token_usage(sess: &Session, total_token_usage: TokenUsage) {
-@@ -10256,17 +10449,21 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
+@@ -10256,17 +10803,21 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
          !sess.input_queue.has_pending_input(&sess.active_turn).await,
          "queue-only mailbox mail should stay buffered once the current turn emitted its answer"
      );
@@ -2006,7 +2881,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
  }
  
  #[tokio::test]
-@@ -10344,19 +10541,23 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
+@@ -10344,19 +10895,23 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
      .await
      .expect("steered input should be accepted");
  
@@ -2041,7 +2916,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
  }
  
  #[tokio::test]
-@@ -10402,19 +10603,23 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
+@@ -10402,19 +10957,23 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
          .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
          .await;
  
@@ -2076,7 +2951,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..f890ab644b7c2e5aab8309db08d0ec9e
  }
  
  #[tokio::test]
-@@ -10466,10 +10671,12 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
+@@ -10466,10 +11025,12 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
  
      assert!(output.needs_follow_up);
      assert!(output.tool_future.is_some());
@@ -2224,6 +3099,29 @@ index a30a4535407277dec98ec2ddfa035f74cf9cb3a1..c0001f87625715750b8dc458c7d8a506
          )
          .await
      }
+diff --git a/codex-rs/core/src/state/turn.rs b/codex-rs/core/src/state/turn.rs
+index d1e31b79949f5df181e2cfabde27c0bb38a2c458..a2f892671401d967897bdd83215c44235ff71be9 100644
+--- a/codex-rs/core/src/state/turn.rs
++++ b/codex-rs/core/src/state/turn.rs
+@@ -30,6 +30,10 @@ use codex_protocol::protocol::TokenUsage;
+ pub(crate) struct ActiveTurn {
+     pub(crate) task: Option<RunningTask>,
+     pub(crate) turn_state: Arc<Mutex<TurnState>>,
++    /// Marks an idle turn slot reserved by an automatic delivery before its
++    /// task has been installed. A user submission may reclaim this slot, but
++    /// must not inherit its pending automatic input.
++    pub(crate) idle_reservation: bool,
+ }
+ 
+ /// Whether mailbox deliveries should still be folded into the current turn.
+@@ -58,6 +62,7 @@ impl Default for ActiveTurn {
+         Self {
+             task: None,
+             turn_state: Arc::new(Mutex::new(TurnState::default())),
++            idle_reservation: false,
+         }
+     }
+ }
 diff --git a/codex-rs/core/src/tasks/lifecycle.rs b/codex-rs/core/src/tasks/lifecycle.rs
 index 789955df1321c8941bb80979f472dbef7492ba23..40d8721b5071aa62abd8f87e3601886551af2d0a 100644
 --- a/codex-rs/core/src/tasks/lifecycle.rs
@@ -2292,10 +3190,265 @@ index 789955df1321c8941bb80979f472dbef7492ba23..40d8721b5071aa62abd8f87e36018865
              contributor
                  .on_turn_abort(codex_extension_api::TurnAbortInput {
 diff --git a/codex-rs/core/src/tasks/mod.rs b/codex-rs/core/src/tasks/mod.rs
-index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..106edeb5bba1dce8f3c99fd0a0b7f10130e69638 100644
+index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc811d35b5 100644
 --- a/codex-rs/core/src/tasks/mod.rs
 +++ b/codex-rs/core/src/tasks/mod.rs
-@@ -511,7 +511,7 @@ impl Session {
+@@ -34,6 +34,7 @@ use crate::session::turn_context::TurnContext;
+ use crate::state::ActiveTurn;
+ use crate::state::RunningTask;
+ use crate::state::TaskKind;
++use crate::state::TurnState;
+ use codex_analytics::TurnProfileFact;
+ use codex_analytics::TurnTokenUsageFact;
+ use codex_login::AuthManager;
+@@ -310,7 +311,60 @@ where
+     }
+ }
+ 
++enum TaskStartOwnership {
++    Available,
++    PendingWorkReservation(Arc<tokio::sync::Mutex<TurnState>>),
++    IdleReservation(Arc<tokio::sync::Mutex<TurnState>>),
++}
++
++#[cfg(test)]
++#[derive(Clone, Default)]
++pub(crate) struct PendingWorkStartTestGate {
++    reached: Arc<Notify>,
++    release: Arc<Notify>,
++}
++
++#[cfg(test)]
++impl PendingWorkStartTestGate {
++    pub(crate) async fn wait_until_reached(&self) {
++        self.reached.notified().await;
++    }
++
++    pub(crate) fn release(&self) {
++        self.release.notify_one();
++    }
++}
++
++#[cfg(test)]
++static PENDING_WORK_START_TEST_GATES: std::sync::LazyLock<
++    std::sync::Mutex<std::collections::HashMap<String, PendingWorkStartTestGate>>,
++> = std::sync::LazyLock::new(Default::default);
++
+ impl Session {
++    #[cfg(test)]
++    pub(crate) fn install_pending_work_start_test_gate(&self, gate: PendingWorkStartTestGate) {
++        let previous = PENDING_WORK_START_TEST_GATES
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .insert(self.thread_id.to_string(), gate);
++        assert!(
++            previous.is_none(),
++            "pending work start test gate already installed"
++        );
++    }
++
++    #[cfg(test)]
++    async fn wait_at_pending_work_start_test_gate(&self) {
++        let gate = PENDING_WORK_START_TEST_GATES
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .remove(&self.thread_id.to_string());
++        if let Some(gate) = gate {
++            gate.reached.notify_one();
++            gate.release.notified().await;
++        }
++    }
++
+     pub async fn spawn_task<T: SessionTask>(
+         self: &Arc<Self>,
+         turn_context: Arc<TurnContext>,
+@@ -328,6 +382,38 @@ impl Session {
+         input: Vec<TurnInput>,
+         task: T,
+     ) {
++        let installed = self
++            .start_task_with_ownership(turn_context, input, task, TaskStartOwnership::Available)
++            .await;
++        assert!(installed, "available task start lost turn ownership");
++    }
++
++    pub(crate) async fn start_task_for_idle_reservation<T: SessionTask>(
++        self: &Arc<Self>,
++        turn_context: Arc<TurnContext>,
++        task: T,
++        turn_state: Arc<tokio::sync::Mutex<TurnState>>,
++    ) -> bool {
++        self.start_task_with_ownership(
++            turn_context,
++            Vec::new(),
++            task,
++            TaskStartOwnership::IdleReservation(turn_state),
++        )
++        .await
++    }
++
++    #[expect(
++        clippy::await_holding_invalid_type,
++        reason = "turn ownership must remain locked through lifecycle setup and task installation"
++    )]
++    async fn start_task_with_ownership<T: SessionTask>(
++        self: &Arc<Self>,
++        turn_context: Arc<TurnContext>,
++        input: Vec<TurnInput>,
++        task: T,
++        ownership: TaskStartOwnership,
++    ) -> bool {
+         let task: Arc<dyn AnySessionTask> = Arc::new(task);
+         let task_kind = task.kind();
+         let span_name = task.span_name();
+@@ -350,13 +436,88 @@ impl Session {
+             .await
+             .clear_turn(&turn_context.sub_id);
+ 
+-        let pending_items = self.input_queue.get_pending_input(&self.active_turn).await;
+-        let turn_state = {
+-            let mut active = self.active_turn.lock().await;
+-            let turn = active.get_or_insert_with(ActiveTurn::default);
+-            debug_assert!(turn.task.is_none());
+-            Arc::clone(&turn.turn_state)
++        // A pending-work reservation keeps the active-turn guard until its task is installed.
++        // This makes the ownership check, pending-input extraction, and installation one handoff.
++        let pending_work_active_turn = match &ownership {
++            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
++                let active = self.active_turn.lock().await;
++                let Some(turn) = active.as_ref() else {
++                    return false;
++                };
++                if turn.idle_reservation
++                    || turn.task.is_some()
++                    || !Arc::ptr_eq(&turn.turn_state, expected_turn_state)
++                {
++                    return false;
++                }
++                Some(active)
++            }
++            TaskStartOwnership::Available | TaskStartOwnership::IdleReservation(_) => None,
++        };
++        let pending_items = match &ownership {
++            TaskStartOwnership::Available => {
++                self.input_queue.get_pending_input(&self.active_turn).await
++            }
++            TaskStartOwnership::IdleReservation(_) => Vec::new(),
++            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
++                let accepts_mailbox_delivery = expected_turn_state
++                    .lock()
++                    .await
++                    .accepts_mailbox_delivery_for_current_turn();
++                if !accepts_mailbox_delivery {
++                    Vec::new()
++                } else {
++                    let mut pending_items = self
++                        .input_queue
++                        .take_pending_input_for_turn_state(expected_turn_state.as_ref())
++                        .await;
++                    pending_items.extend(self.input_queue.drain_mailbox_input_items().await);
++                    pending_items
++                }
++            }
+         };
++        let mut active = match pending_work_active_turn {
++            Some(active) => active,
++            None => self.active_turn.lock().await,
++        };
++        let turn = match &ownership {
++            TaskStartOwnership::Available => active.get_or_insert_with(ActiveTurn::default),
++            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
++                let Some(turn) = active.as_mut() else {
++                    return false;
++                };
++                if turn.idle_reservation
++                    || turn.task.is_some()
++                    || !Arc::ptr_eq(&turn.turn_state, expected_turn_state)
++                {
++                    return false;
++                }
++                turn
++            }
++            TaskStartOwnership::IdleReservation(expected_turn_state) => {
++                let Some(turn) = active.as_mut() else {
++                    return false;
++                };
++                if self
++                    .client_input_reservations
++                    .load(std::sync::atomic::Ordering::Acquire)
++                    != 0
++                    || !turn.idle_reservation
++                    || turn.task.is_some()
++                    || !Arc::ptr_eq(&turn.turn_state, expected_turn_state)
++                {
++                    return false;
++                }
++                turn
++            }
++        };
++        assert!(turn.task.is_none(), "cannot overwrite an installed task");
++        assert!(
++            !matches!(&ownership, TaskStartOwnership::Available) || !turn.idle_reservation,
++            "cannot claim an automatic idle reservation as an unreserved task"
++        );
++        turn.idle_reservation = false;
++        let turn_state = Arc::clone(&turn.turn_state);
+         turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
+         self.input_queue
+             .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
+@@ -365,9 +526,6 @@ impl Session {
+             .await;
+ 
+         let turn_extension_data = Arc::clone(&turn_context.extension_data);
+-        let mut active = self.active_turn.lock().await;
+-        let turn = active.get_or_insert_with(ActiveTurn::default);
+-        debug_assert!(turn.task.is_none());
+         let agent_execution_guard = self.services.agent_control.execution_guard(
+             turn_context.multi_agent_version,
+             &turn_context.session_source,
+@@ -449,6 +607,7 @@ impl Session {
+             _timer: timer,
+         };
+         turn.task = Some(running_task);
++        true
+     }
+ 
+     /// Starts a regular turn when the session is idle and pending work is waiting.
+@@ -479,18 +638,29 @@ impl Session {
+             return;
+         }
+ 
+-        {
++        let turn_state = {
+             let mut active_turn = self.active_turn.lock().await;
+             if active_turn.is_some() {
+                 return;
+             }
+-            *active_turn = Some(ActiveTurn::default());
+-        }
++            let reservation = ActiveTurn::default();
++            let turn_state = Arc::clone(&reservation.turn_state);
++            *active_turn = Some(reservation);
++            turn_state
++        };
+ 
+         let turn_context = self.new_default_turn_with_sub_id(sub_id).await;
+         self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
+             .await;
+-        self.start_task(turn_context, Vec::new(), RegularTask::new())
++        #[cfg(test)]
++        self.wait_at_pending_work_start_test_gate().await;
++        let _installed = self
++            .start_task_with_ownership(
++                turn_context,
++                Vec::new(),
++                RegularTask::new(),
++                TaskStartOwnership::PendingWorkReservation(turn_state),
++            )
+             .await;
+     }
+ 
+@@ -511,7 +681,7 @@ impl Session {
          }
  
          if let Some(turn_context) = turn_context.as_deref() {
@@ -2304,7 +3457,7 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..106edeb5bba1dce8f3c99fd0a0b7f101
                  .await;
          }
          if let Some(active_turn) = active_turn_to_clear {
-@@ -551,7 +551,7 @@ impl Session {
+@@ -551,7 +721,7 @@ impl Session {
              self.handle_task_abort(task, reason.clone()).await;
          }
          if let Some(turn_context) = turn_context.as_deref() {
@@ -2313,7 +3466,7 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..106edeb5bba1dce8f3c99fd0a0b7f101
                  .await;
          }
          // Let interrupted tasks observe cancellation before dropping pending approvals, or an
-@@ -769,7 +769,7 @@ impl Session {
+@@ -769,7 +939,7 @@ impl Session {
                  profile: turn_context.turn_timing_state.complete_profile(),
              });
          let event = if let Some(reason) = abort_reason {
@@ -2322,7 +3475,7 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..106edeb5bba1dce8f3c99fd0a0b7f101
                  .await;
              EventMsg::TurnAborted(TurnAbortedEvent {
                  turn_id: Some(turn_context.sub_id.clone()),
-@@ -784,8 +784,7 @@ impl Session {
+@@ -784,8 +954,7 @@ impl Session {
                  .time_to_first_token_ms()
                  .await;
              let error = turn_context.terminal_error.lock().await.clone();
@@ -2619,10 +3772,10 @@ index 0000000000000000000000000000000000000000..cbaaf99d46a4cb634ad36f8fbaaa5c1d
 +tempfile = { workspace = true }
 diff --git a/codex-rs/ext/shadow/src/lib.rs b/codex-rs/ext/shadow/src/lib.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..78201802d8c325c177a8230316a310b8e548ee39
+index 0000000000000000000000000000000000000000..b3a81a191cea2b1a97aa0735d52355baf07ce7e0
 --- /dev/null
 +++ b/codex-rs/ext/shadow/src/lib.rs
-@@ -0,0 +1,1265 @@
+@@ -0,0 +1,1414 @@
 +//! Small, host-independent Shadow Mind runtime primitives.
 +//!
 +//! The host integration owns spawning and response injection. This crate owns
@@ -2843,7 +3996,7 @@ index 0000000000000000000000000000000000000000..78201802d8c325c177a8230316a310b8
 +    next_run_id: AtomicU64,
 +    scheduled_turn: Mutex<Option<String>>,
 +    runs: Mutex<BTreeMap<String, RunHandle>>,
-+    reports: Mutex<Vec<ShadowReport>>,
++    reports: Mutex<BTreeMap<u64, Vec<ShadowReport>>>,
 +    delivery_lock: Semaphore,
 +}
 +
@@ -2854,19 +4007,21 @@ index 0000000000000000000000000000000000000000..78201802d8c325c177a8230316a310b8
 +
 +    /// Starts a new user epoch and cancels every old shadow run.
 +    pub fn begin_user_input(&self) -> u64 {
++        let mut reports = self.reports();
 +        let epoch = self.epoch.fetch_add(1, Ordering::AcqRel) + 1;
 +        for run in self.runs().values() {
 +            run.cancel();
 +        }
-+        self.reports().clear();
++        reports.clear();
 +        epoch
 +    }
 +
 +    pub fn cancel_runs(&self) {
++        let mut reports = self.reports();
 +        for run in self.runs().values() {
 +            run.cancel();
 +        }
-+        self.reports().clear();
++        reports.clear();
 +    }
 +
 +    /// The only lifecycle edge allowed to schedule a heartbeat.
@@ -2917,12 +4072,19 @@ index 0000000000000000000000000000000000000000..78201802d8c325c177a8230316a310b8
 +        if active_turn_id != Some(expected_turn_id) {
 +            return ReportDisposition::WrongTurn;
 +        }
-+        self.reports().push(report);
++        let mut reports = self.reports();
++        if report.epoch != self.epoch() {
++            return ReportDisposition::Stale;
++        }
++        reports.entry(report.epoch).or_default().push(report);
 +        ReportDisposition::Accepted
 +    }
 +
 +    pub fn take_reports(&self) -> Vec<ShadowReport> {
 +        std::mem::take(&mut *self.reports())
++            .into_values()
++            .flatten()
++            .collect()
 +    }
 +
 +    fn active_run_ids(&self) -> BTreeSet<String> {
@@ -2936,12 +4098,23 @@ index 0000000000000000000000000000000000000000..78201802d8c325c177a8230316a310b8
 +        if report.epoch != expected_epoch || report.epoch != self.epoch() {
 +            return false;
 +        }
-+        self.reports().push(report);
++        let mut reports = self.reports();
++        if report.epoch != self.epoch() {
++            return false;
++        }
++        reports.entry(report.epoch).or_default().push(report);
 +        true
 +    }
 +
-+    fn take_reports_for_delivery(&self) -> Vec<ShadowReport> {
-+        std::mem::take(&mut *self.reports())
++    fn take_reports_for_delivery(&self, run: &RunHandle, expected_epoch: u64) -> Vec<ShadowReport> {
++        if run.is_cancelled() || run.epoch != expected_epoch || self.epoch() != expected_epoch {
++            return Vec::new();
++        }
++        let mut reports = self.reports();
++        if run.is_cancelled() || self.epoch() != expected_epoch {
++            return Vec::new();
++        }
++        reports.remove(&expected_epoch).unwrap_or_default()
 +    }
 +
 +    async fn delivery_permit(&self) -> Result<SemaphorePermit<'_>, tokio::sync::AcquireError> {
@@ -2958,7 +4131,7 @@ index 0000000000000000000000000000000000000000..78201802d8c325c177a8230316a310b8
 +        self.runs.lock().unwrap_or_else(PoisonError::into_inner)
 +    }
 +
-+    fn reports(&self) -> MutexGuard<'_, Vec<ShadowReport>> {
++    fn reports(&self) -> MutexGuard<'_, BTreeMap<u64, Vec<ShadowReport>>> {
 +        self.reports.lock().unwrap_or_else(PoisonError::into_inner)
 +    }
 +}
@@ -2970,7 +4143,7 @@ index 0000000000000000000000000000000000000000..78201802d8c325c177a8230316a310b8
 +            next_run_id: AtomicU64::new(0),
 +            scheduled_turn: Mutex::new(None),
 +            runs: Mutex::new(BTreeMap::new()),
-+            reports: Mutex::new(Vec::new()),
++            reports: Mutex::new(BTreeMap::new()),
 +            delivery_lock: Semaphore::new(/*permits*/ 1),
 +        }
 +    }
@@ -3456,7 +4629,13 @@ index 0000000000000000000000000000000000000000..78201802d8c325c177a8230316a310b8
 +        state.runtime.finish_run(&run.run_id);
 +        return;
 +    };
-+    let reports = state.runtime.take_reports_for_delivery();
++    if run.is_cancelled() || state.runtime.epoch() != expected_epoch {
++        state.runtime.finish_run(&run.run_id);
++        return;
++    }
++    let reports = state
++        .runtime
++        .take_reports_for_delivery(&run, expected_epoch);
 +    if reports.is_empty() {
 +        state.runtime.finish_run(&run.run_id);
 +        return;
@@ -3731,17 +4910,140 @@ index 0000000000000000000000000000000000000000..78201802d8c325c177a8230316a310b8
 +    #[test]
 +    fn accepted_report_is_drained_once() {
 +        let runtime = ThreadRuntime::default();
++        let run = runtime.start_run();
 +        let report = ShadowReport {
 +            shadow_id: "reviewer".to_owned(),
 +            shadow_name: "Reviewer".to_owned(),
 +            content: "accepted".to_owned(),
 +            epoch: runtime.epoch(),
-+            run_id: "1".to_owned(),
++            run_id: run.run_id.clone(),
 +        };
 +
 +        assert!(runtime.accept_idle_report(report.clone(), runtime.epoch()));
-+        assert_eq!(runtime.take_reports_for_delivery(), vec![report]);
-+        assert!(runtime.take_reports_for_delivery().is_empty());
++        assert_eq!(
++            runtime.take_reports_for_delivery(&run, runtime.epoch()),
++            vec![report]
++        );
++        assert!(
++            runtime
++                .take_reports_for_delivery(&run, runtime.epoch())
++                .is_empty()
++        );
++    }
++
++    #[tokio::test]
++    async fn old_epoch_delivery_worker_cannot_drain_new_epoch_report() {
++        let runtime = Arc::new(ThreadRuntime::default());
++        let old_epoch = runtime.epoch();
++        let old_run = runtime.start_run();
++        let held_delivery = runtime
++            .delivery_permit()
++            .await
++            .expect("delivery semaphore should be open");
++        let (waiting_tx, waiting_rx) = tokio::sync::oneshot::channel();
++        let worker_runtime = Arc::clone(&runtime);
++        let worker_run = old_run.clone();
++        let old_worker = tokio::spawn(async move {
++            waiting_tx
++                .send(())
++                .expect("test should still be waiting for old worker");
++            let _delivery = worker_runtime
++                .delivery_permit()
++                .await
++                .expect("delivery semaphore should be open");
++            worker_runtime.take_reports_for_delivery(&worker_run, old_epoch)
++        });
++
++        tokio::time::timeout(std::time::Duration::from_secs(2), waiting_rx)
++            .await
++            .expect("old worker should reach the delivery semaphore")
++            .expect("old worker should signal before waiting");
++        runtime.epoch.fetch_add(1, Ordering::AcqRel);
++        assert!(!old_run.is_cancelled());
++
++        let new_epoch = runtime.epoch();
++        let replacement_run = runtime.start_run();
++        let new_report = ShadowReport {
++            shadow_id: "reviewer".to_owned(),
++            shadow_name: "Reviewer".to_owned(),
++            content: "new epoch report".to_owned(),
++            epoch: new_epoch,
++            run_id: replacement_run.run_id.clone(),
++        };
++        assert!(runtime.accept_idle_report(new_report.clone(), new_epoch));
++        drop(held_delivery);
++
++        let drained_by_old_worker =
++            tokio::time::timeout(std::time::Duration::from_secs(2), old_worker)
++                .await
++                .expect("old worker should finish after permit release")
++                .expect("old worker task should not panic");
++        assert!(
++            drained_by_old_worker.is_empty(),
++            "an old delivery worker drained reports accepted for epoch {new_epoch}: {drained_by_old_worker:?}"
++        );
++        assert_eq!(
++            runtime.take_reports_for_delivery(&replacement_run, new_epoch),
++            vec![new_report]
++        );
++    }
++
++    #[tokio::test]
++    async fn cancelled_same_epoch_delivery_worker_cannot_drain_replacement_report() {
++        let runtime = Arc::new(ThreadRuntime::default());
++        let expected_epoch = runtime.epoch();
++        let old_run = runtime.start_run();
++        let held_delivery = runtime
++            .delivery_permit()
++            .await
++            .expect("delivery semaphore should be open");
++        let (waiting_tx, waiting_rx) = tokio::sync::oneshot::channel();
++        let worker_runtime = Arc::clone(&runtime);
++        let worker_run = old_run.clone();
++        let old_worker = tokio::spawn(async move {
++            assert!(!worker_run.is_cancelled());
++            waiting_tx
++                .send(())
++                .expect("test should still be waiting for old worker");
++            let _delivery = worker_runtime
++                .delivery_permit()
++                .await
++                .expect("delivery semaphore should be open");
++            worker_runtime.take_reports_for_delivery(&worker_run, expected_epoch)
++        });
++
++        tokio::time::timeout(std::time::Duration::from_secs(2), waiting_rx)
++            .await
++            .expect("old worker should pass its cancellation check")
++            .expect("old worker should signal before waiting");
++        old_run.cancel();
++        assert!(old_run.is_cancelled());
++        assert_eq!(runtime.epoch(), expected_epoch);
++
++        let replacement_run = runtime.start_run();
++        let replacement_report = ShadowReport {
++            shadow_id: "reviewer".to_owned(),
++            shadow_name: "Reviewer".to_owned(),
++            content: "same epoch replacement".to_owned(),
++            epoch: expected_epoch,
++            run_id: replacement_run.run_id.clone(),
++        };
++        assert!(runtime.accept_idle_report(replacement_report.clone(), expected_epoch));
++        drop(held_delivery);
++
++        let drained_by_cancelled_worker =
++            tokio::time::timeout(std::time::Duration::from_secs(2), old_worker)
++                .await
++                .expect("old worker should finish after permit release")
++                .expect("old worker task should not panic");
++        assert!(
++            drained_by_cancelled_worker.is_empty(),
++            "a worker cancelled while waiting for delivery drained a same-epoch replacement: {drained_by_cancelled_worker:?}"
++        );
++        assert_eq!(
++            runtime.take_reports_for_delivery(&replacement_run, expected_epoch),
++            vec![replacement_report]
++        );
 +    }
 +
 +    #[tokio::test]

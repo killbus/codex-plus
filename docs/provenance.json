@@ -35,13 +35,13 @@
   "note": "Content differences are reported explicitly; rebuilt Git symlinks are hashed through their targets across checkout modes, while copied source bytes remain literal materialization evidence.",
   "patch_sha256": [
     "eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6",
-    "66eb2781e9240be70cebd92072469090e1873d6edf4ba816cfa4593dca4776c4"
+    "7c2e2476c5df766d0d114c7bde3f737aa4ee5a2f2216d16d4da79239be461bd9"
   ],
   "patches": [
     "patches/goal-old-continuation.patch",
     "patches/shadow-mind.patch"
   ],
-  "rebuilt_tree_sha256": "eb662d747f3ce0edd3b74980237a465ab4b768340e70016f88943fdb3bf3b4d1",
-  "source_tree_sha256": "04e4bc1cd28ea6fd24d2f216cf834fbbf89d56bfcde0986ca262f19284dd982a",
+  "rebuilt_tree_sha256": "32ade360669c741132a34acc42f156114d8318d17a48270c60773d2206a98cf1",
+  "source_tree_sha256": "ed5f153f420dfde260335e45917b316d0f7656772838d55ab48a5cf276436df2",
   "upstream": "https://github.com/openai/codex.git"
 }

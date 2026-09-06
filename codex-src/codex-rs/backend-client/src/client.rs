@@ -34,7 +34,15 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::fmt;
 
+mod chatgpt_turn_cost;
 mod rate_limit_resets;
+mod thread_usage;
+pub(crate) mod turn_usage;
+
+pub use chatgpt_turn_cost::ChatgptThreadTurnCosts;
+pub use chatgpt_turn_cost::ChatgptTurnCost;
+pub use thread_usage::ThreadUsage;
+pub use thread_usage::ThreadUsageBreakdownGroup;
 
 #[derive(Debug)]
 pub enum RequestError {
@@ -153,7 +161,27 @@ impl fmt::Debug for Client {
 
 impl Client {
     pub fn new(base_url: impl Into<String>, http_client_factory: HttpClientFactory) -> Self {
-        let mut base_url = base_url.into();
+        let http = RouteAwareClientPool::with_chatgpt_cloudflare_cookies_without_request_logging(
+            http_client_factory,
+            ClientRouteClass::Api,
+        );
+        Self::with_http(base_url.into(), http)
+    }
+
+    /// Creates a client that never forwards its credentials to a redirect destination.
+    pub fn new_without_redirects(
+        base_url: impl Into<String>,
+        http_client_factory: HttpClientFactory,
+    ) -> Self {
+        let http =
+            RouteAwareClientPool::with_chatgpt_cloudflare_cookies_without_redirects_or_request_logging(
+                http_client_factory,
+                ClientRouteClass::Api,
+            );
+        Self::with_http(base_url.into(), http)
+    }
+
+    fn with_http(mut base_url: String, http: RouteAwareClientPool) -> Self {
         // Normalize common ChatGPT hostnames to include /backend-api so we hit the WHAM paths.
         // Also trim trailing slashes for consistent URL building.
         while base_url.ends_with('/') {
@@ -165,10 +193,6 @@ impl Client {
         {
             base_url = format!("{base_url}/backend-api");
         }
-        let http = RouteAwareClientPool::with_chatgpt_cloudflare_cookies_without_request_logging(
-            http_client_factory,
-            ClientRouteClass::Api,
-        );
         let path_style = PathStyle::from_base_url(&base_url);
         Self {
             base_url,
@@ -685,15 +709,24 @@ impl Client {
             crate::types::PlanType::Pro => AccountPlanType::Pro,
             crate::types::PlanType::ProLite => AccountPlanType::ProLite,
             crate::types::PlanType::Team => AccountPlanType::Team,
+            crate::types::PlanType::SelfServeBusinessProLite => {
+                AccountPlanType::SelfServeBusinessProLite
+            }
             crate::types::PlanType::SelfServeBusinessUsageBased => {
                 AccountPlanType::SelfServeBusinessUsageBased
             }
             crate::types::PlanType::Business => AccountPlanType::Business,
+            crate::types::PlanType::Ent26 => AccountPlanType::Ent26,
+            crate::types::PlanType::EnterpriseCbpAutomation => {
+                AccountPlanType::EnterpriseCbpAutomation
+            }
             crate::types::PlanType::EnterpriseCbpUsageBased => {
                 AccountPlanType::EnterpriseCbpUsageBased
             }
             crate::types::PlanType::Enterprise => AccountPlanType::Enterprise,
             crate::types::PlanType::Edu | crate::types::PlanType::Education => AccountPlanType::Edu,
+            crate::types::PlanType::EduPlus => AccountPlanType::EduPlus,
+            crate::types::PlanType::EduPro => AccountPlanType::EduPro,
             crate::types::PlanType::Guest
             | crate::types::PlanType::FreeWorkspace
             | crate::types::PlanType::Quorum
@@ -731,7 +764,14 @@ mod tests {
     use wiremock::matchers::path;
 
     #[test]
-    fn map_plan_type_supports_usage_based_business_variants() {
+    fn map_plan_type_supports_business_variants() {
+        let business_prolite =
+            serde_json::from_str::<crate::types::PlanType>("\"self_serve_business_prolite\"")
+                .expect("business ProLite should deserialize");
+        assert_eq!(
+            Client::map_plan_type(business_prolite),
+            AccountPlanType::SelfServeBusinessProLite
+        );
         assert_eq!(
             Client::map_plan_type(crate::types::PlanType::SelfServeBusinessUsageBased),
             AccountPlanType::SelfServeBusinessUsageBased
@@ -740,6 +780,13 @@ mod tests {
             Client::map_plan_type(crate::types::PlanType::EnterpriseCbpUsageBased),
             AccountPlanType::EnterpriseCbpUsageBased
         );
+        assert_eq!(
+            Client::map_plan_type(crate::types::PlanType::EnterpriseCbpAutomation),
+            AccountPlanType::EnterpriseCbpAutomation
+        );
+        let ent26 = serde_json::from_str::<crate::types::PlanType>("\"ent26\"")
+            .expect("ent26 backend plan should deserialize");
+        assert_eq!(Client::map_plan_type(ent26), AccountPlanType::Ent26);
     }
 
     #[test]

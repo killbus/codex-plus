@@ -1,8 +1,8 @@
 diff --git a/codex-rs/Cargo.lock b/codex-rs/Cargo.lock
-index ab630ef467daea78c257295423f5fe6df08cdfea..6f6a2fdcf792d888320db65fcd14a22d7f31603b 100644
+index e217b70249..885ef723db 100644
 --- a/codex-rs/Cargo.lock
 +++ b/codex-rs/Cargo.lock
-@@ -1998,6 +1998,7 @@ dependencies = [
+@@ -2076,6 +2076,7 @@ dependencies = [
   "codex-rmcp-client",
   "codex-rollout",
   "codex-sandboxing",
@@ -10,7 +10,7 @@ index ab630ef467daea78c257295423f5fe6df08cdfea..6f6a2fdcf792d888320db65fcd14a22d
   "codex-shell-command",
   "codex-skills",
   "codex-skills-extension",
-@@ -3937,6 +3938,24 @@ dependencies = [
+@@ -4280,6 +4281,24 @@ dependencies = [
   "tracing",
  ]
  
@@ -35,7 +35,7 @@ index ab630ef467daea78c257295423f5fe6df08cdfea..6f6a2fdcf792d888320db65fcd14a22d
  [[package]]
  name = "codex-shell-command"
  version = "0.0.0"
-@@ -4168,6 +4187,7 @@ dependencies = [
+@@ -4534,6 +4553,7 @@ dependencies = [
   "codex-protocol",
   "codex-rollout",
   "codex-sandboxing",
@@ -44,18 +44,18 @@ index ab630ef467daea78c257295423f5fe6df08cdfea..6f6a2fdcf792d888320db65fcd14a22d
   "codex-state",
   "codex-terminal-detection",
 diff --git a/codex-rs/Cargo.toml b/codex-rs/Cargo.toml
-index e921ef9993b5f7b0febe349074d65cccaba02bff..6b3ce91412323d5e2cf7d5a88624c16f33082411 100644
+index 351d1e6cd5..1a28bd42fd 100644
 --- a/codex-rs/Cargo.toml
 +++ b/codex-rs/Cargo.toml
-@@ -59,6 +59,7 @@ members = [
-     "ext/memories",
+@@ -69,6 +69,7 @@ members = [
      "ext/mcp",
+     "ext/queue",
      "ext/skills",
 +    "ext/shadow",
      "ext/web-search",
      "external-agent-migration",
      "keyring-store",
-@@ -229,6 +230,7 @@ codex-secrets = { path = "secrets" }
+@@ -256,6 +257,7 @@ codex-secrets = { path = "secrets" }
  codex-shell-command = { path = "shell-command" }
  codex-shell-escalation = { path = "shell-escalation" }
  codex-skills-extension = { path = "ext/skills" }
@@ -64,10 +64,10 @@ index e921ef9993b5f7b0febe349074d65cccaba02bff..6b3ce91412323d5e2cf7d5a88624c16f
  codex-state = { path = "state" }
  codex-stdio-to-uds = { path = "stdio-to-uds" }
 diff --git a/codex-rs/analytics/src/reducer.rs b/codex-rs/analytics/src/reducer.rs
-index b5ef11f64e3802cc43598836db9cefa45b0bb640..7c8b0684b50c2b6d8e4b7746f9e8affee194faae 100644
+index be5b8f24cb..2ea9a02ff0 100644
 --- a/codex-rs/analytics/src/reducer.rs
 +++ b/codex-rs/analytics/src/reducer.rs
-@@ -413,7 +413,8 @@ impl TurnToolCounts {
+@@ -505,7 +505,8 @@ impl TurnToolCounts {
              | ThreadItem::Sleep(_)
              | ThreadItem::EnteredReviewMode { .. }
              | ThreadItem::ExitedReviewMode { .. }
@@ -77,7 +77,7 @@ index b5ef11f64e3802cc43598836db9cefa45b0bb640..7c8b0684b50c2b6d8e4b7746f9e8affe
          }
          self.total += 1;
      }
-@@ -1755,7 +1756,8 @@ fn tracked_tool_item_id(item: &ThreadItem) -> Option<&str> {
+@@ -2488,7 +2489,8 @@ pub(crate) fn tracked_tool_item_id(item: &ThreadItem) -> Option<&str> {
          | ThreadItem::Sleep(_)
          | ThreadItem::EnteredReviewMode { .. }
          | ThreadItem::ExitedReviewMode { .. }
@@ -88,10 +88,10 @@ index b5ef11f64e3802cc43598836db9cefa45b0bb640..7c8b0684b50c2b6d8e4b7746f9e8affe
  }
  
 diff --git a/codex-rs/app-server-protocol/schema/json/ServerNotification.json b/codex-rs/app-server-protocol/schema/json/ServerNotification.json
-index 3fbb2df3e49225c571606ec55fbd4ec2d115a3ff..e02ae30734ee61f579bf0998a108253d71a37ace 100644
+index b15474ffc7..16e2912fa1 100644
 --- a/codex-rs/app-server-protocol/schema/json/ServerNotification.json
 +++ b/codex-rs/app-server-protocol/schema/json/ServerNotification.json
-@@ -4640,6 +4640,39 @@
+@@ -5148,6 +5148,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -130,12 +130,12 @@ index 3fbb2df3e49225c571606ec55fbd4ec2d115a3ff..e02ae30734ee61f579bf0998a108253d
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json
-index 27446544f466e527311e77a49c744196118af278..d40eea9b2f531ef93678e7d4aca52b35cb20d3f8 100644
+index 47e75d11d5..89451a9765 100644
 --- a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json
 +++ b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.schemas.json
-@@ -19239,6 +19239,39 @@
+@@ -21608,6 +21608,39 @@
              "title": "SleepThreadItem",
              "type": "object"
            },
@@ -174,12 +174,12 @@ index 27446544f466e527311e77a49c744196118af278..d40eea9b2f531ef93678e7d4aca52b35
 +          },
            {
              "properties": {
-               "id": {
+               "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json
-index 3960c8e0eb3ffeadaf50ee19c2a8b8693349f70a..328390e7a11a83927adf6bf8faddbddfc0a4eee0 100644
+index fce5c1d1b8..7d50405858 100644
 --- a/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json
 +++ b/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json
-@@ -17003,6 +17003,39 @@
+@@ -19322,6 +19322,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -218,12 +218,12 @@ index 3960c8e0eb3ffeadaf50ee19c2a8b8693349f70a..328390e7a11a83927adf6bf8faddbddf
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ItemCompletedNotification.json b/codex-rs/app-server-protocol/schema/json/v2/ItemCompletedNotification.json
-index a83056ed4539da9a4d577668c05544a6228ce715..ccbfeaa2f4d064aba00bcd6263d75e612710367e 100644
+index f3caf84e96..c4b19023b1 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ItemCompletedNotification.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ItemCompletedNotification.json
-@@ -1192,6 +1192,39 @@
+@@ -1441,6 +1441,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -262,12 +262,12 @@ index a83056ed4539da9a4d577668c05544a6228ce715..ccbfeaa2f4d064aba00bcd6263d75e61
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ItemStartedNotification.json b/codex-rs/app-server-protocol/schema/json/v2/ItemStartedNotification.json
-index 0c99b79b89ebf11706617e0decdee7b2a64d7c83..c271b09f289b57b41d1fca8475ff9009acb2c764 100644
+index 8432eb5437..2acfc98e03 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ItemStartedNotification.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ItemStartedNotification.json
-@@ -1192,6 +1192,39 @@
+@@ -1441,6 +1441,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -306,12 +306,12 @@ index 0c99b79b89ebf11706617e0decdee7b2a64d7c83..c271b09f289b57b41d1fca8475ff9009
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ReviewStartResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ReviewStartResponse.json
-index 071b06a4a57ff1c56fb1608b86587f0f983be88c..1928b457c8bc217896543de5ef18a4656fe9ea58 100644
+index 7da4ff34d8..d98fffce8e 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ReviewStartResponse.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ReviewStartResponse.json
-@@ -1337,6 +1337,39 @@
+@@ -1629,6 +1629,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -350,12 +350,12 @@ index 071b06a4a57ff1c56fb1608b86587f0f983be88c..1928b457c8bc217896543de5ef18a465
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadForkResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadForkResponse.json
-index c69777948649eafe27ebcf981521104da3ba2a84..b1dd96a32f8acbdcecd8bfab9be0f1898265da78 100644
+index e0aa43dd29..80353fb022 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ThreadForkResponse.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadForkResponse.json
-@@ -1865,6 +1865,39 @@
+@@ -2213,6 +2213,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -394,12 +394,12 @@ index c69777948649eafe27ebcf981521104da3ba2a84..b1dd96a32f8acbdcecd8bfab9be0f189
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadListResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadListResponse.json
-index 5b64c33981daa785058e868986b570475978b45d..7d05260b8b32d7592dd496b0ce3cc44c064f1328 100644
+index 576edc360a..6807a35915 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ThreadListResponse.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadListResponse.json
-@@ -1656,6 +1656,39 @@
+@@ -2004,6 +2004,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -438,12 +438,12 @@ index 5b64c33981daa785058e868986b570475978b45d..7d05260b8b32d7592dd496b0ce3cc44c
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadMetadataUpdateResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadMetadataUpdateResponse.json
-index 7423f89fd7d058a8e30754d964bb034ed7563f94..89a5a1a47e743dcc91df060d5dfd11efe95f0b58 100644
+index 6db9cbc2e2..014d412824 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ThreadMetadataUpdateResponse.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadMetadataUpdateResponse.json
-@@ -1656,6 +1656,39 @@
+@@ -2004,6 +2004,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -482,12 +482,12 @@ index 7423f89fd7d058a8e30754d964bb034ed7563f94..89a5a1a47e743dcc91df060d5dfd11ef
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadReadResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadReadResponse.json
-index ed061e1616eee20c4d7421495c994e595eedf7db..fa9dcbdd983c68fde5f41b43590116677b577649 100644
+index 8682470d11..2fa07002fd 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ThreadReadResponse.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadReadResponse.json
-@@ -1656,6 +1656,39 @@
+@@ -2004,6 +2004,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -526,12 +526,12 @@ index ed061e1616eee20c4d7421495c994e595eedf7db..fa9dcbdd983c68fde5f41b4359011667
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeResponse.json
-index df2fd0218b32e3d9ef546d47a3ef855db10e7a04..303359dfcd5b4a31b8bcec716886df4ee453a46d 100644
+index 030a48b1b8..dc42d0a094 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeResponse.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeResponse.json
-@@ -1865,6 +1865,39 @@
+@@ -2213,6 +2213,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -570,12 +570,12 @@ index df2fd0218b32e3d9ef546d47a3ef855db10e7a04..303359dfcd5b4a31b8bcec716886df4e
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadRollbackResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadRollbackResponse.json
-index 4264629db423829cb51fca6077f7c8e6fc82784e..5a05dfdafef14bf0ccc943a02461ce7500169f3c 100644
+index da1efc5a23..4b293b6f0a 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ThreadRollbackResponse.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadRollbackResponse.json
-@@ -1656,6 +1656,39 @@
+@@ -2004,6 +2004,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -614,12 +614,12 @@ index 4264629db423829cb51fca6077f7c8e6fc82784e..5a05dfdafef14bf0ccc943a02461ce75
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadStartResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadStartResponse.json
-index 5d40babf4dc21c8e8843260e69bc7a762af7c9f1..f5243d11a9f1b4e3c2d8d72481fdcd94b9fb2d09 100644
+index 984dc14b69..b53bda89e4 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ThreadStartResponse.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadStartResponse.json
-@@ -1865,6 +1865,39 @@
+@@ -2213,6 +2213,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -658,12 +658,12 @@ index 5d40babf4dc21c8e8843260e69bc7a762af7c9f1..f5243d11a9f1b4e3c2d8d72481fdcd94
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadStartedNotification.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadStartedNotification.json
-index 3b0288ebcc0096c439cf5cdfe3a42abca377b5e0..24a4f151198ca0915cfea057c5b1bf6f66c3e302 100644
+index 63cc9d2e9a..647b03313a 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ThreadStartedNotification.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadStartedNotification.json
-@@ -1656,6 +1656,39 @@
+@@ -2004,6 +2004,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -702,12 +702,12 @@ index 3b0288ebcc0096c439cf5cdfe3a42abca377b5e0..24a4f151198ca0915cfea057c5b1bf6f
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/ThreadUnarchiveResponse.json b/codex-rs/app-server-protocol/schema/json/v2/ThreadUnarchiveResponse.json
-index 3fa6217a3afdad265511e2ea16813602a7ef440e..d880d0c48d1780cc210f4b9d42929c6d9438edfb 100644
+index 04e4301147..cb70e73a0a 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/ThreadUnarchiveResponse.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/ThreadUnarchiveResponse.json
-@@ -1656,6 +1656,39 @@
+@@ -2004,6 +2004,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -746,12 +746,12 @@ index 3fa6217a3afdad265511e2ea16813602a7ef440e..d880d0c48d1780cc210f4b9d42929c6d
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json b/codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json
-index 7ac5c78f33c40250f1b0238cbe5ac462e4c787a7..3c5b0d373893e428c1277cf856b1d7591acef57c 100644
+index 7db8c18c82..ec57e4d261 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json
-@@ -1337,6 +1337,39 @@
+@@ -1629,6 +1629,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -790,12 +790,12 @@ index 7ac5c78f33c40250f1b0238cbe5ac462e4c787a7..3c5b0d373893e428c1277cf856b1d759
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json b/codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json
-index 1d38983832b2c74dff4ecc4c90f02bf9cb26ea50..f181ce39e97b8d0be9db3761610b1ab4daac095b 100644
+index 9552369480..667fa3ca67 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json
-@@ -1337,6 +1337,39 @@
+@@ -1629,6 +1629,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -834,12 +834,12 @@ index 1d38983832b2c74dff4ecc4c90f02bf9cb26ea50..f181ce39e97b8d0be9db3761610b1ab4
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/json/v2/TurnStartedNotification.json b/codex-rs/app-server-protocol/schema/json/v2/TurnStartedNotification.json
-index d91e66f191c62f6d947bf078215666513ed9a006..5d1fbc7de531fba4678046cff19e9d45dd39b53b 100644
+index 57052afd9f..14f1700053 100644
 --- a/codex-rs/app-server-protocol/schema/json/v2/TurnStartedNotification.json
 +++ b/codex-rs/app-server-protocol/schema/json/v2/TurnStartedNotification.json
-@@ -1337,6 +1337,39 @@
+@@ -1629,6 +1629,39 @@
            "title": "SleepThreadItem",
            "type": "object"
          },
@@ -878,10 +878,10 @@ index d91e66f191c62f6d947bf078215666513ed9a006..5d1fbc7de531fba4678046cff19e9d45
 +        },
          {
            "properties": {
-             "id": {
+             "failure": {
 diff --git a/codex-rs/app-server-protocol/schema/typescript/ShadowReportItem.ts b/codex-rs/app-server-protocol/schema/typescript/ShadowReportItem.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..5b3c82fc59230fb750a243eba9195a0d0a06e60b
+index 0000000000..5b3c82fc59
 --- /dev/null
 +++ b/codex-rs/app-server-protocol/schema/typescript/ShadowReportItem.ts
 @@ -0,0 +1,8 @@
@@ -894,10 +894,10 @@ index 0000000000000000000000000000000000000000..5b3c82fc59230fb750a243eba9195a0d
 + */
 +export type ShadowReportItem = { id: string, shadowId: string, shadowName: string, content: string, };
 diff --git a/codex-rs/app-server-protocol/schema/typescript/index.ts b/codex-rs/app-server-protocol/schema/typescript/index.ts
-index 8080f942ad87216781646b8f79eff4dd3b28eacb..303cd9ac7567d2abfa529f8bc85666f0ae0e7f4c 100644
+index 893117f759..c1b34ae661 100644
 --- a/codex-rs/app-server-protocol/schema/typescript/index.ts
 +++ b/codex-rs/app-server-protocol/schema/typescript/index.ts
-@@ -78,6 +78,7 @@ export type { ServerNotificationEnvelope } from "./ServerNotificationEnvelope";
+@@ -79,6 +79,7 @@ export type { ServerNotificationEnvelope } from "./ServerNotificationEnvelope";
  export type { ServerRequest } from "./ServerRequest";
  export type { SessionSource } from "./SessionSource";
  export type { Settings } from "./Settings";
@@ -906,10 +906,10 @@ index 8080f942ad87216781646b8f79eff4dd3b28eacb..303cd9ac7567d2abfa529f8bc85666f0
  export type { SubAgentSource } from "./SubAgentSource";
  export type { ThreadId } from "./ThreadId";
 diff --git a/codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts b/codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts
-index df1a5dbe344a5b8e746795c1dab78924b09a2f95..84d0bd71aee45f2118e16d8b7f1336a65cd94b35 100644
+index ae8c00a720..78689a787e 100644
 --- a/codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts
 +++ b/codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts
-@@ -5,6 +5,7 @@ import type { ImageGenerationItem } from "../ImageGenerationItem";
+@@ -6,6 +6,7 @@ import type { ImageGenerationItem } from "../ImageGenerationItem";
  import type { LegacyAppPathString } from "../LegacyAppPathString";
  import type { MessagePhase } from "../MessagePhase";
  import type { ReasoningEffort } from "../ReasoningEffort";
@@ -917,26 +917,26 @@ index df1a5dbe344a5b8e746795c1dab78924b09a2f95..84d0bd71aee45f2118e16d8b7f1336a6
  import type { SleepItem } from "../SleepItem";
  import type { WebSearchItem } from "../WebSearchItem";
  import type { JsonValue } from "../serde_json/JsonValue";
-@@ -106,4 +107,4 @@ reasoningEffort: ReasoningEffort | null,
+@@ -117,4 +118,4 @@ reasoningEffort: ReasoningEffort | null,
  /**
   * Last known status of the target agents, when available.
   */
 -agentsStates: { [key in string]?: CollabAgentState }, } | { "type": "subAgentActivity", id: string, kind: SubAgentActivityKind, agentThreadId: string, agentPath: string, } | { "type": "webSearch" } & WebSearchItem | { "type": "imageView", id: string, path: LegacyAppPathString, } | { "type": "sleep" } & SleepItem | { "type": "imageGeneration" } & ImageGenerationItem | { "type": "enteredReviewMode", id: string, review: string, } | { "type": "exitedReviewMode", id: string, review: string, } | { "type": "contextCompaction", id: string, };
 +agentsStates: { [key in string]?: CollabAgentState }, } | { "type": "subAgentActivity", id: string, kind: SubAgentActivityKind, agentThreadId: string, agentPath: string, } | { "type": "webSearch" } & WebSearchItem | { "type": "imageView", id: string, path: LegacyAppPathString, } | { "type": "sleep" } & SleepItem | { "type": "shadowReport" } & ShadowReportItem | { "type": "imageGeneration" } & ImageGenerationItem | { "type": "enteredReviewMode", id: string, review: string, } | { "type": "exitedReviewMode", id: string, review: string, } | { "type": "contextCompaction", id: string, };
 diff --git a/codex-rs/app-server-protocol/src/protocol/thread_history.rs b/codex-rs/app-server-protocol/src/protocol/thread_history.rs
-index eccdd750925fb2768fe3a1a75502dcdfd562faa4..ea24433e572d048b650900bfdc0bf129636585ad 100644
+index 028069a0f5..8198668921 100644
 --- a/codex-rs/app-server-protocol/src/protocol/thread_history.rs
 +++ b/codex-rs/app-server-protocol/src/protocol/thread_history.rs
-@@ -1606,6 +1606,7 @@ mod tests {
-     use super::*;
+@@ -1661,6 +1661,7 @@ mod tests {
+     use crate::protocol::v2::AsyncUserInputQuestion;
      use crate::protocol::v2::CommandExecutionSource;
      use codex_extension_items::ExtensionItem as CoreExtensionItem;
 +    use codex_extension_items::shadow::ShadowReportItem as CoreShadowReportItem;
      use codex_extension_items::sleep::SleepItem as CoreSleepItem;
      use codex_protocol::ThreadId;
      use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem as CoreDynamicToolCallOutputContentItem;
-@@ -2031,6 +2032,55 @@ mod tests {
-         );
+@@ -2155,6 +2156,56 @@ mod tests {
+         assert_eq!(builder.finish()[0].items, expected);
      }
  
 +    #[test]
@@ -963,6 +963,7 @@ index eccdd750925fb2768fe3a1a75502dcdfd562faa4..ea24433e572d048b650900bfdc0bf129
 +                item: CoreTurnItem::Extension(CoreExtensionItem::ShadowReport(
 +                    shadow_report.clone(),
 +                )),
++                started_at_ms: None,
 +                completed_at_ms: 1_000,
 +            }),
 +            EventMsg::TurnComplete(TurnCompleteEvent {
@@ -992,18 +993,18 @@ index eccdd750925fb2768fe3a1a75502dcdfd562faa4..ea24433e572d048b650900bfdc0bf129
      fn rebuilds_extension_image_generation_item_from_persisted_completion() {
          let turn_id = "turn-1";
 diff --git a/codex-rs/app-server-protocol/src/protocol/v2/item.rs b/codex-rs/app-server-protocol/src/protocol/v2/item.rs
-index e26fa35baa82beadfe28d405fa3e524a5b4f4c1c..b264e5b3b14cd75df08faa50614e8fa126f96726 100644
+index 9b24e093ae..8329d65caf 100644
 --- a/codex-rs/app-server-protocol/src/protocol/v2/item.rs
 +++ b/codex-rs/app-server-protocol/src/protocol/v2/item.rs
-@@ -14,6 +14,7 @@ use crate::protocol::item_builders::review_output_text;
- use codex_experimental_api_macros::ExperimentalApi;
+@@ -17,6 +17,7 @@ use codex_experimental_api_macros::ExperimentalApi;
  use codex_extension_items::ExtensionItem;
+ pub use codex_extension_items::image_generation::ImageGenerationFailure;
  pub use codex_extension_items::image_generation::ImageGenerationItem;
 +pub use codex_extension_items::shadow::ShadowReportItem;
  pub use codex_extension_items::sleep::SleepItem;
  pub use codex_extension_items::web_search::WebSearchAction;
  pub use codex_extension_items::web_search::WebSearchItem;
-@@ -370,6 +371,7 @@ pub enum ThreadItem {
+@@ -396,6 +397,7 @@ pub enum ThreadItem {
          path: LegacyAppPathString,
      },
      Sleep(SleepItem),
@@ -1011,7 +1012,7 @@ index e26fa35baa82beadfe28d405fa3e524a5b4f4c1c..b264e5b3b14cd75df08faa50614e8fa1
      ImageGeneration(ImageGenerationItem),
      #[serde(rename_all = "camelCase")]
      #[ts(rename_all = "camelCase")]
-@@ -429,6 +431,7 @@ impl ThreadItem {
+@@ -456,6 +458,7 @@ impl ThreadItem {
              | ThreadItem::ContextCompaction { id, .. } => id,
              ThreadItem::WebSearch(item) => &item.id,
              ThreadItem::Sleep(item) => &item.id,
@@ -1019,7 +1020,7 @@ index e26fa35baa82beadfe28d405fa3e524a5b4f4c1c..b264e5b3b14cd75df08faa50614e8fa1
              ThreadItem::ImageGeneration(item) => &item.id,
          }
      }
-@@ -905,6 +908,7 @@ impl From<CoreTurnItem> for ThreadItem {
+@@ -982,6 +985,7 @@ impl From<CoreTurnItem> for ThreadItem {
              CoreTurnItem::Extension(extension) => match extension {
                  ExtensionItem::ImageGeneration(item) => ThreadItem::ImageGeneration(item),
                  ExtensionItem::Sleep(item) => ThreadItem::Sleep(item),
@@ -1028,10 +1029,10 @@ index e26fa35baa82beadfe28d405fa3e524a5b4f4c1c..b264e5b3b14cd75df08faa50614e8fa1
              },
              CoreTurnItem::ImageGeneration(image) => {
 diff --git a/codex-rs/app-server-protocol/src/protocol/v2/tests.rs b/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
-index 7b38dceb2d85c36a8bd31e2bb9c5710c9bd7d369..8a5dccc11de2203ba1fdb43c7d7850cf5a892c8f 100644
+index 971ef366e7..ee1dfa31c5 100644
 --- a/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
 +++ b/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
-@@ -2891,6 +2891,30 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
+@@ -3368,6 +3368,30 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
          ThreadItem::WebSearch(expected_search_item)
      );
  
@@ -1063,10 +1064,10 @@ index 7b38dceb2d85c36a8bd31e2bb9c5710c9bd7d369..8a5dccc11de2203ba1fdb43c7d7850cf
          id: "view-image-1".to_string(),
          path: PathUri::from_abs_path(&test_path_buf("/tmp/view-image.png").abs()),
 diff --git a/codex-rs/app-server/Cargo.toml b/codex-rs/app-server/Cargo.toml
-index ef18d17b87b05d8d48b757e9ca1e2aaa8a7e0584..81d00b86f26b8699398b7406f19dee0e80704fca 100644
+index 2f08b0fdc8..6e9e62589f 100644
 --- a/codex-rs/app-server/Cargo.toml
 +++ b/codex-rs/app-server/Cargo.toml
-@@ -56,6 +56,7 @@ codex-http-client = { workspace = true }
+@@ -60,6 +60,7 @@ codex-http-client = { workspace = true }
  codex-otel = { workspace = true }
  codex-plugin = { workspace = true }
  codex-shell-command = { workspace = true }
@@ -1075,18 +1076,18 @@ index ef18d17b87b05d8d48b757e9ca1e2aaa8a7e0584..81d00b86f26b8699398b7406f19dee0e
  codex-skills-extension = { workspace = true }
  codex-utils-cli = { workspace = true }
 diff --git a/codex-rs/app-server/README.md b/codex-rs/app-server/README.md
-index 40d76de738e4dd6c2ebd83566a297dc77113a39d..f1f30aa7081b4a6d4abcdb4f25f102d8b8bdd05a 100644
+index a0aa92b7fc..2a2253e6c5 100644
 --- a/codex-rs/app-server/README.md
 +++ b/codex-rs/app-server/README.md
-@@ -1465,6 +1465,7 @@ The app-server streams JSON-RPC notifications while a turn is running. Each turn
- - `webSearch` — `{id, query, action?, results?}` for a web search request issued by the agent; `action` mirrors the Responses API web_search action payload (`search`, `open_page`, `find_in_page`) and may be omitted until completion. For standalone web search, `results` contains the out-of-band structured result DTOs returned by `/v1/alpha/search`; clients should ignore result types and fields they do not understand.
+@@ -1843,6 +1843,7 @@ The app-server streams JSON-RPC notifications while a turn is running. Each turn
+ - `imageGeneration` — `{id, status, revisedPrompt, result, transparentBackground, savedPath?}` for a generated image. `transparentBackground` is `true` when the Images API reports a transparent background, `false` when it reports an opaque background, and `null` when the background is automatic, unavailable, or the item has not completed. The field is always present on v2 item payloads, including persisted and resumed items.
  - `imageView` — `{id, path}` emitted when the agent invokes the image viewer tool.
  - `sleep` — `{id, durationMs}` emitted while the agent waits for a duration or new input.
 +- `shadowReport` — `{id, shadowId, shadowName, content}` containing a report produced by the named Shadow extension. It is extension-generated content, not a user message, so clients should render it with Shadow attribution instead of a user-message treatment.
  - `enteredReviewMode` — `{id, review}` sent when the reviewer starts; `review` is a short user-facing label such as `"current changes"` or the requested target description.
  - `exitedReviewMode` — `{id, review}` emitted when the reviewer finishes; `review` is the full plain-text review (usually, overall notes plus bullet point findings).
  - `contextCompaction` — `{id}` emitted when codex compacts the conversation history. This can happen automatically.
-@@ -1473,7 +1474,7 @@ The app-server streams JSON-RPC notifications while a turn is running. Each turn
+@@ -1851,7 +1852,7 @@ The app-server streams JSON-RPC notifications while a turn is running. Each turn
  All items emit shared lifecycle events:
  
  - `item/started` — emits the full `item` when a new unit of work begins so the UI can render it immediately; the `item.id` in this payload matches the `itemId` used by deltas.
@@ -1094,12 +1095,12 @@ index 40d76de738e4dd6c2ebd83566a297dc77113a39d..f1f30aa7081b4a6d4abcdb4f25f102d8
 +- `item/completed` — sends the final `item` once that work itself finishes (for example, after a tool call or message completes); treat this as the authoritative execution/result state. Completed `shadowReport` items are durable and are returned in resumed/replayed thread history in their original relative order.
  - `item/autoApprovalReview/started` — [UNSTABLE] temporary auto-review notification carrying `{threadId, turnId, targetItemId, review, action}` when approval auto-review begins. This shape is expected to change soon.
  - `item/autoApprovalReview/completed` — [UNSTABLE] temporary auto-review notification carrying `{threadId, turnId, targetItemId, review, action}` when approval auto-review resolves. This shape is expected to change soon.
- 
+ - `autoApprovalReview/strictReviewRequired` — experimental notification carrying `{threadId, turnId, startedAtMs}` whenever elevated or stale Guardian v2 risk requires synchronous approval review.
 diff --git a/codex-rs/app-server/src/extensions.rs b/codex-rs/app-server/src/extensions.rs
-index 10fa319f62fc3aba05d019586f593b06f91cd595..3dd82cf00af7daab193737d9eb9efa0edfae7347 100644
+index 929eab5392..5c54639e0a 100644
 --- a/codex-rs/app-server/src/extensions.rs
 +++ b/codex-rs/app-server/src/extensions.rs
-@@ -49,7 +49,7 @@ pub(crate) fn thread_extensions<S>(
+@@ -57,7 +57,7 @@ pub(crate) fn thread_extensions<S>(
      dependencies: ThreadExtensionDependencies,
  ) -> Arc<ExtensionRegistry<Config>>
  where
@@ -1108,26 +1109,22 @@ index 10fa319f62fc3aba05d019586f593b06f91cd595..3dd82cf00af7daab193737d9eb9efa0e
  {
      let ThreadExtensionDependencies {
          event_sink,
-@@ -71,7 +71,7 @@ where
-             state_db,
-             analytics_events_client,
-             codex_otel::global(),
--            thread_manager,
-+            thread_manager.clone(),
-             goal_service,
-             |config: &Config| config.features.enabled(codex_features::Feature::Goals),
-         );
-@@ -82,7 +82,8 @@ where
-         git_attribution_base_url,
-         http_client_factory,
+@@ -99,11 +99,12 @@ where
      );
--    codex_guardian::install(&mut builder, guardian_agent_spawner);
-+    codex_guardian::install(&mut builder, guardian_agent_spawner.clone());
+     codex_guardian_v2::install(
+         &mut builder,
+-        guardian_agent_spawner,
++        guardian_agent_spawner.clone(),
+         internal_session_spawner(thread_manager.clone()),
+         auth_manager.clone(),
+-        thread_manager,
++        thread_manager.clone(),
+     );
 +    codex_shadow_extension::install(&mut builder, guardian_agent_spawner, thread_manager);
      codex_memories_extension::install(&mut builder, codex_otel::global());
      codex_mcp_extension::install(&mut builder);
      codex_mcp_extension::install_executor_plugins(&mut builder, environment_manager);
-@@ -171,7 +172,7 @@ impl ExtensionEventSink for AppServerExtensionEventSink {
+@@ -308,7 +309,7 @@ impl ExtensionEventSink for AppServerExtensionEventSink {
  
  pub(crate) fn guardian_agent_spawner(
      thread_manager: Weak<ThreadManager>,
@@ -1137,12 +1134,12 @@ index 10fa319f62fc3aba05d019586f593b06f91cd595..3dd82cf00af7daab193737d9eb9efa0e
            options: StartThreadOptions|
            -> AgentSpawnFuture<'static, NewThread, CodexErr> {
 diff --git a/codex-rs/app-server/tests/suite/v2/thread_resume.rs b/codex-rs/app-server/tests/suite/v2/thread_resume.rs
-index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e2221d79d 100644
+index a6f728deb1..56658d667c 100644
 --- a/codex-rs/app-server/tests/suite/v2/thread_resume.rs
 +++ b/codex-rs/app-server/tests/suite/v2/thread_resume.rs
-@@ -56,9 +56,11 @@ use codex_app_server_protocol::ThreadStartParams;
- use codex_app_server_protocol::ThreadStartResponse;
- use codex_app_server_protocol::ThreadStatus;
+@@ -71,9 +71,11 @@ use codex_app_server_protocol::ThreadStatusChangedNotification;
+ use codex_app_server_protocol::ThreadTurnsListParams;
+ use codex_app_server_protocol::ThreadTurnsListResponse;
  use codex_app_server_protocol::ThreadUnsubscribeParams;
 +use codex_app_server_protocol::TurnCompletedNotification;
  use codex_app_server_protocol::TurnItemsView;
@@ -1152,17 +1149,8 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e
  use codex_app_server_protocol::TurnStatus;
  use codex_app_server_protocol::UserInput;
  use codex_config::types::AuthCredentialsStoreMode;
-@@ -101,6 +103,8 @@ use core_test_support::responses;
- use core_test_support::skip_if_no_network;
- use core_test_support::skip_if_remote;
- use core_test_support::skip_if_wine_exec;
-+use core_test_support::streaming_sse::StreamingSseChunk;
-+use core_test_support::streaming_sse::start_streaming_sse_server;
- use pretty_assertions::assert_eq;
- use serde_json::json;
- use std::fs::FileTimes;
-@@ -1839,6 +1843,286 @@ async fn thread_goal_set_edits_objective_without_resetting_usage() -> Result<()>
-     Ok(())
+@@ -3288,6 +3290,408 @@ fn ungated_goal_response(body: String) -> Vec<StreamingSseChunk> {
+     vec![StreamingSseChunk { gate: None, body }]
  }
  
 +#[tokio::test]
@@ -1186,13 +1174,16 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e
 +        responses::ev_completed("complete-goal"),
 +    ]);
 +    let done = create_final_assistant_message_sse_response("Done")?;
-+    let dropped_after_handshake = responses::sse(vec![responses::ev_response_created(
-+        "dropped-after-handshake",
-+    )]);
++    let dropped_after_handshake = |response_id| {
++        responses::sse(vec![responses::ev_response_created(response_id)])
++    };
 +    let stream = |body| vec![StreamingSseChunk { gate: None, body }];
 +    let (server, _) = start_streaming_sse_server(vec![
 +        stream(create_goal),
-+        stream(dropped_after_handshake),
++        stream(dropped_after_handshake("dropped-first-attempt")),
++        stream(dropped_after_handshake("dropped-first-retry")),
++        stream(dropped_after_handshake("dropped-second-attempt")),
++        stream(dropped_after_handshake("dropped-second-retry")),
 +        stream(complete_goal),
 +        stream(done),
 +    ])
@@ -1204,6 +1195,12 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e
 +        .enable_feature(Feature::Shadow)
 +        .with_provider_config("supports_websockets = false")
 +        .write(codex_home.path())?;
++    let config_path = codex_home.path().join("config.toml");
++    let config = std::fs::read_to_string(&config_path)?;
++    std::fs::write(
++        &config_path,
++        config.replace("stream_max_retries = 0", "stream_max_retries = 1"),
++    )?;
 +    let mut mcp = TestAppServer::builder()
 +        .with_codex_home(codex_home.path())
 +        .without_managed_config()
@@ -1273,14 +1270,61 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e
 +        ThreadGoalStatus::Active
 +    );
 +
++    let failed_again: TurnCompletedNotification = timeout(
++        DEFAULT_READ_TIMEOUT,
++        mcp.read_notification("turn/completed"),
++    )
++    .await??;
++    assert_eq!(failed_again.turn.id, continued.turn.id);
++    assert_eq!(failed_again.turn.status, TurnStatus::Failed);
++    assert!(failed_again.turn.error.is_some());
++
++    let continued_again_notification = timeout(
++        DEFAULT_READ_TIMEOUT,
++        mcp.read_stream_until_matching_notification(
++            "second automatic turn/started",
++            |notification| {
++                notification.method == "turn/started"
++                    && notification
++                        .params
++                        .as_ref()
++                        .and_then(|params| params.get("turn"))
++                        .and_then(|turn| turn.get("id"))
++                        .and_then(serde_json::Value::as_str)
++                        .is_some_and(|turn_id| {
++                            turn_id != turn.id && turn_id != continued.turn.id
++                        })
++            },
++        ),
++    )
++    .await??;
++    let continued_again: TurnStartedNotification = serde_json::from_value(
++        continued_again_notification
++            .params
++            .expect("second turn/started params"),
++    )?;
++    assert_eq!(continued_again.thread_id, thread.id);
++    assert_ne!(continued_again.turn.id, turn.id);
++    assert_ne!(continued_again.turn.id, continued.turn.id);
++
++    let get_id = mcp
++        .send_raw_request("thread/goal/get", Some(json!({ "threadId": thread.id })))
++        .await?;
++    let persisted: codex_app_server_protocol::ThreadGoalGetResponse =
++        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(get_id)).await??;
++    assert_eq!(
++        persisted.goal.expect("goal should remain persisted").status,
++        ThreadGoalStatus::Active
++    );
++
 +    let completed: TurnCompletedNotification = timeout(
 +        DEFAULT_READ_TIMEOUT,
 +        mcp.read_notification("turn/completed"),
 +    )
 +    .await??;
-+    assert_eq!(completed.turn.id, continued.turn.id);
++    assert_eq!(completed.turn.id, continued_again.turn.id);
 +    assert_eq!(completed.turn.status, TurnStatus::Completed);
-+    assert_eq!(server.requests().await.len(), 4);
++    assert_eq!(server.requests().await.len(), 7);
 +    server.shutdown().await;
 +    Ok(())
 +}
@@ -1338,6 +1382,9 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e
 +        &server,
 +        vec![
 +            responses::sse_response(create_goal),
++            transient_error.clone(),
++            transient_error.clone(),
++            transient_error.clone(),
 +            transient_error,
 +            responses::sse_response(complete_goal),
 +            responses::sse_response(done),
@@ -1351,6 +1398,15 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e
 +        .enable_feature(Feature::Shadow)
 +        .with_provider_config("supports_websockets = false")
 +        .write(codex_home.path())?;
++    let config_path = codex_home.path().join("config.toml");
++    let config = std::fs::read_to_string(&config_path)?;
++    std::fs::write(
++        &config_path,
++        config.replace(
++            "request_max_retries = 0",
++            "request_max_retries = 1",
++        ),
++    )?;
 +    let mut mcp = TestAppServer::builder()
 +        .with_codex_home(codex_home.path())
 +        .without_managed_config()
@@ -1392,7 +1448,7 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e
 +            .error
 +            .as_ref()
 +            .and_then(|error| error.codex_error_info.clone()),
-+        Some(expected_error)
++        Some(expected_error.clone())
 +    );
 +
 +    let continued_notification = timeout(
@@ -1427,12 +1483,66 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e
 +        ThreadGoalStatus::Active
 +    );
 +
++    let failed_again: TurnCompletedNotification = timeout(
++        DEFAULT_READ_TIMEOUT,
++        mcp.read_notification("turn/completed"),
++    )
++    .await??;
++    assert_eq!(failed_again.turn.id, continued.turn.id);
++    assert_eq!(failed_again.turn.status, TurnStatus::Failed);
++    assert_eq!(
++        failed_again
++            .turn
++            .error
++            .as_ref()
++            .and_then(|error| error.codex_error_info.clone()),
++        Some(expected_error)
++    );
++
++    let continued_again_notification = timeout(
++        DEFAULT_READ_TIMEOUT,
++        mcp.read_stream_until_matching_notification(
++            "second automatic turn/started after transient HTTP error",
++            |notification| {
++                notification.method == "turn/started"
++                    && notification
++                        .params
++                        .as_ref()
++                        .and_then(|params| params.get("turn"))
++                        .and_then(|turn| turn.get("id"))
++                        .and_then(serde_json::Value::as_str)
++                        .is_some_and(|turn_id| {
++                            turn_id != turn.id && turn_id != continued.turn.id
++                        })
++            },
++        ),
++    )
++    .await??;
++    let continued_again: TurnStartedNotification = serde_json::from_value(
++        continued_again_notification
++            .params
++            .expect("second turn/started params"),
++    )?;
++    assert_eq!(continued_again.thread_id, thread.id);
++    assert_ne!(continued_again.turn.id, turn.id);
++    assert_ne!(continued_again.turn.id, continued.turn.id);
++
++    let get_id = mcp
++        .send_raw_request("thread/goal/get", Some(json!({ "threadId": thread.id })))
++        .await?;
++    let persisted: codex_app_server_protocol::ThreadGoalGetResponse =
++        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(get_id)).await??;
++    assert_eq!(
++        persisted.goal.expect("goal should remain persisted").status,
++        ThreadGoalStatus::Active
++    );
++
 +    let completed: TurnCompletedNotification = timeout(
 +        DEFAULT_READ_TIMEOUT,
 +        mcp.read_notification("turn/completed"),
 +    )
 +    .await??;
-+    assert_eq!(completed.turn.id, continued.turn.id);
++    assert_eq!(completed.turn.id, continued_again.turn.id);
 +    assert_eq!(completed.turn.status, TurnStatus::Completed);
 +    assert_eq!(
 +        server
@@ -1440,7 +1550,7 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e
 +            .await
 +            .expect("mock server should retain received requests")
 +            .len(),
-+        4
++        7
 +    );
 +    Ok(())
 +}
@@ -1449,36 +1559,76 @@ index 21018e9b576fab3b48f976b91692b2d8ce5e5fd8..4dbf989232330a8067601f43d527281e
  async fn thread_goal_lifecycle_emits_analytics_and_clear_deletes_goal() -> Result<()> {
      let server = create_mock_responses_server_sequence_unchecked(vec![
 diff --git a/codex-rs/core/src/codex_thread.rs b/codex-rs/core/src/codex_thread.rs
-index 6eba281d5b3bbb1660db5581d64a35549a706331..8edb6970b50215cbf45b2e75d55d1926553c5180 100644
+index 172726f98b..0f832181e3 100644
 --- a/codex-rs/core/src/codex_thread.rs
 +++ b/codex-rs/core/src/codex_thread.rs
-@@ -6,6 +6,7 @@ use crate::session::SessionSettingsUpdate;
- use crate::session::SteerInputError;
- use crate::session::session::Session;
+@@ -13,6 +13,7 @@ use codex_diagnostics::GaugeGuard;
  use codex_exec_server::SelectedCapabilityRootsStatus;
+ use codex_extension_api::ConversationHistorySnapshot;
+ use codex_extension_api::ThreadIdleCause;
 +use codex_extension_api::AutomaticTurnOrigin;
  use codex_features::Feature;
+ use codex_history::RolloutItem;
  use codex_otel::SessionTelemetry;
- use codex_protocol::ThreadId;
-@@ -16,6 +17,7 @@ use codex_protocol::config_types::ReasoningSummary;
+@@ -25,6 +26,7 @@ use codex_protocol::config_types::ReasoningSummary;
  use codex_protocol::config_types::WindowsSandboxLevel;
  use codex_protocol::error::CodexErr;
  use codex_protocol::error::Result as CodexResult;
 +use codex_protocol::items::TurnItem;
  use codex_protocol::mcp::CallToolResult;
+ use codex_protocol::mcp::ClientMcpExtensions;
  use codex_protocol::models::ActivePermissionProfile;
- use codex_protocol::models::ContentItem;
-@@ -97,6 +99,8 @@ pub enum TryStartTurnIfIdleRejectionReason {
-     /// Another turn or task is active, or the idle reservation was lost before
-     /// the automatic turn could start.
-     Busy,
-+    /// The idle edge that authorized this work is no longer current.
-+    StaleIdleEpoch,
+@@ -105,6 +107,48 @@ pub struct ThreadConfigSnapshot {
+     pub originator: String,
  }
  
- /// Rejection returned when an extension asks to start automatic idle work but
-@@ -329,6 +333,17 @@ impl CodexThread {
-         self.session.inject_if_running(items).await
++/// Explains why `CodexThread::try_start_turn_if_idle` rejected an automatic
++/// idle turn.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum TryStartTurnIfIdleRejectionReason {
++    /// User/client-triggered mailbox work is already queued and must take
++    /// priority over extension-initiated idle work.
++    PendingTriggerTurn,
++    /// The thread is in Plan mode, where automatic idle work must not start a
++    /// new model turn.
++    PlanMode,
++    /// Another turn or task is active, or the idle reservation was lost before
++    /// the automatic turn could start.
++    Busy,
++    /// The idle edge that authorized this work is no longer current.
++    StaleIdleEpoch,
++}
++
++/// Rejection returned when an extension asks to start automatic idle work but
++/// the thread is not eligible to run it.
++#[derive(Debug)]
++pub struct TryStartTurnIfIdleError {
++    reason: TryStartTurnIfIdleRejectionReason,
++    input: Vec<ResponseItem>,
++}
++
++impl TryStartTurnIfIdleError {
++    pub(crate) fn new(reason: TryStartTurnIfIdleRejectionReason, input: Vec<ResponseItem>) -> Self {
++        Self { reason, input }
++    }
++
++    /// Returns the stable reason the automatic idle turn was rejected.
++    pub fn reason(&self) -> TryStartTurnIfIdleRejectionReason {
++        self.reason
++    }
++
++    /// Consumes the rejection and returns the original model-visible input
++    /// unchanged, so callers can retry, drop, or log it explicitly.
++    pub fn into_input(self) -> Vec<ResponseItem> {
++        self.input
++    }
++}
++
+ impl ThreadConfigSnapshot {
+     pub fn cwd(&self) -> &AbsolutePathBuf {
+         &self.environments.legacy_fallback_cwd
+@@ -500,6 +544,66 @@ impl CodexThread {
+         task.turn_context.turn_metadata_state.root_turn_id()
      }
  
 +    /// Injects items only while the expected turn is still active.
@@ -1492,13 +1642,26 @@ index 6eba281d5b3bbb1660db5581d64a35549a706331..8edb6970b50215cbf45b2e75d55d1926
 +            .await
 +    }
 +
-     /// Starts an automatic regular turn with model-visible items only when idle
-     /// work is allowed for this thread.
-     ///
-@@ -349,6 +364,35 @@ impl CodexThread {
-         self.session.try_start_turn_if_idle(items).await
-     }
- 
++    /// Starts an automatic regular turn with model-visible items only when idle
++    /// work is allowed for this thread.
++    ///
++    /// This is the required entry point for extensions that want to launch
++    /// model-visible work from `ThreadLifecycleContributor::on_thread_idle`.
++    /// The call succeeds only if no user/client-triggered turn is queued, no
++    /// task is currently active, and the thread is not in Plan mode. Active
++    /// Review tasks are rejected by the active-task check because Review turns
++    /// are not steerable.
++    ///
++    /// On rejection, the returned error includes a stable reason and carries
++    /// the original `items` unchanged so the caller can decide whether to drop
++    /// them, retry later, or log why no automatic turn was started.
++    pub async fn try_start_turn_if_idle(
++        &self,
++        items: Vec<ResponseItem>,
++    ) -> Result<(), TryStartTurnIfIdleError> {
++        self.session.try_start_turn_if_idle(items).await
++    }
++
 +    /// Starts automatic idle work only while the observed idle epoch is current.
 +    pub async fn try_start_turn_if_idle_for_epoch(
 +        &self,
@@ -1532,10 +1695,10 @@ index 6eba281d5b3bbb1660db5581d64a35549a706331..8edb6970b50215cbf45b2e75d55d1926
          &self,
          app_server_client_name: Option<String>,
 diff --git a/codex-rs/core/src/guardian/review.rs b/codex-rs/core/src/guardian/review.rs
-index 9db4bac06d8011d8b127868e4f61feb1bfbcbb36..4d188289618fb01915c619c9324a4436db644e21 100644
+index d1132afb22..28d0f595e7 100644
 --- a/codex-rs/core/src/guardian/review.rs
 +++ b/codex-rs/core/src/guardian/review.rs
-@@ -920,6 +920,7 @@ fn should_retry_guardian_review(outcome: &GuardianReviewOutcome) -> bool {
+@@ -1149,6 +1149,7 @@ fn should_retry_guardian_review(outcome: &GuardianReviewOutcome) -> bool {
              GuardianReviewError::Session {
                  error_info: Some(
                      CodexErrorInfo::ServerOverloaded
@@ -1543,7 +1706,7 @@ index 9db4bac06d8011d8b127868e4f61feb1bfbcbb36..4d188289618fb01915c619c9324a4436
                          | CodexErrorInfo::HttpConnectionFailed { .. }
                          | CodexErrorInfo::ResponseStreamConnectionFailed { .. }
                          | CodexErrorInfo::InternalServerError
-@@ -975,6 +976,9 @@ mod review_tests {
+@@ -1204,6 +1205,9 @@ mod review_tests {
          };
          let transient_error_info = [
              CodexErrorInfo::ServerOverloaded,
@@ -1553,7 +1716,7 @@ index 9db4bac06d8011d8b127868e4f61feb1bfbcbb36..4d188289618fb01915c619c9324a4436
              CodexErrorInfo::HttpConnectionFailed {
                  http_status_code: Some(502),
              },
-@@ -1019,6 +1023,13 @@ mod review_tests {
+@@ -1248,6 +1252,13 @@ mod review_tests {
                  )),
                  false,
              ),
@@ -1568,13 +1731,123 @@ index 9db4bac06d8011d8b127868e4f61feb1bfbcbb36..4d188289618fb01915c619c9324a4436
                  GuardianReviewOutcome::Error(GuardianReviewError::parse(anyhow::anyhow!("parse"))),
                  true,
 diff --git a/codex-rs/core/src/guardian/tests.rs b/codex-rs/core/src/guardian/tests.rs
-index f376f3bf623dc5332315cf0a0dfcf9fe81c0c7c1..55793205703586f373c9a30c51bf12d08f00e910 100644
+index d88dc31287..9475974cfc 100644
 --- a/codex-rs/core/src/guardian/tests.rs
 +++ b/codex-rs/core/src/guardian/tests.rs
-@@ -2443,6 +2443,70 @@ async fn guardian_review_retries_transient_session_failure_then_approves() -> an
+@@ -3101,6 +3101,179 @@ async fn guardian_review_retries_transient_session_failure_then_approves() -> an
      Ok(())
  }
  
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn guardian_review_retries_disconnected_stream_then_approves() -> anyhow::Result<()> {
++    skip_if_no_network!(Ok(()));
++
++    let approval = serde_json::json!({
++        "risk_level": "low",
++        "user_authorization": "high",
++        "outcome": "allow",
++        "rationale": "stream retry succeeded",
++    })
++    .to_string();
++    let dropped = || StreamingSseChunk {
++        gate: None,
++        body: sse(vec![ev_response_created("resp-disconnected")]),
++    };
++    let (server, _) = start_streaming_sse_server(vec![
++        vec![dropped()],
++        vec![dropped()],
++        vec![StreamingSseChunk {
++            gate: None,
++            body: sse(vec![
++                ev_response_created("resp-disconnect-approved"),
++                ev_assistant_message("msg-disconnect-approved", &approval),
++                ev_completed("resp-disconnect-approved"),
++            ]),
++        }],
++    ])
++    .await;
++    let (session, turn) = guardian_test_session_and_turn_with_base_url(server.uri()).await;
++    seed_guardian_parent_history(&session, &turn).await;
++
++    let (outcome, metadata) = run_guardian_review_session_for_test(
++        Arc::clone(&session),
++        Arc::clone(&turn),
++        guardian_exec_command_request("shell-disconnect-retry"),
++        ApprovalRequestReasons::default(),
++        guardian_output_schema(),
++        /*external_cancel*/ None,
++        /*max_attempts*/ 3,
++    )
++    .await;
++
++    let GuardianReviewOutcome::Completed(assessment) = outcome else {
++        panic!("expected guardian assessment after retrying disconnected stream");
++    };
++    assert_eq!(assessment.outcome, GuardianAssessmentOutcome::Allow);
++    assert_eq!(assessment.rationale, "stream retry succeeded");
++    assert_eq!(metadata.attempt_count, 2);
++    assert_eq!(server.requests().await.len(), 3);
++    server.shutdown().await;
++    Ok(())
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn guardian_review_retries_http_5xx_then_approves() -> anyhow::Result<()> {
++    skip_if_no_network!(Ok(()));
++
++    let server = start_mock_server().await;
++    let overload = || {
++        wiremock::ResponseTemplate::new(503).set_body_json(serde_json::json!({
++            "error": {
++                "code": "server_is_overloaded",
++                "message": "temporary reviewer overload",
++            }
++        }))
++    };
++    let approval = serde_json::json!({
++        "risk_level": "low",
++        "user_authorization": "high",
++        "outcome": "allow",
++        "rationale": "5xx retry succeeded",
++    })
++    .to_string();
++    let request_log = mount_response_sequence(
++        &server,
++        vec![
++            overload(),
++            overload(),
++            core_test_support::responses::sse_response(sse(vec![
++                ev_response_created("resp-overload-approved"),
++                ev_assistant_message("msg-overload-approved", &approval),
++                ev_completed("resp-overload-approved"),
++            ])),
++        ],
++    )
++    .await;
++    let (session, turn) = guardian_test_session_and_turn(&server).await;
++    seed_guardian_parent_history(&session, &turn).await;
++
++    let (outcome, metadata) = run_guardian_review_session_for_test(
++        Arc::clone(&session),
++        Arc::clone(&turn),
++        guardian_exec_command_request("shell-overload-retry"),
++        ApprovalRequestReasons::default(),
++        guardian_output_schema(),
++        /*external_cancel*/ None,
++        /*max_attempts*/ 3,
++    )
++    .await;
++
++    let GuardianReviewOutcome::Completed(assessment) = outcome else {
++        panic!("expected guardian assessment after retrying HTTP 5xx");
++    };
++    assert_eq!(assessment.outcome, GuardianAssessmentOutcome::Allow);
++    assert_eq!(assessment.rationale, "5xx retry succeeded");
++    assert_eq!(metadata.attempt_count, 2);
++    assert_eq!(request_log.requests().len(), 3);
++    Ok(())
++}
++
 +#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 +async fn guardian_review_retries_http_429_then_approves() -> anyhow::Result<()> {
 +    skip_if_no_network!(Ok(()));
@@ -1627,10 +1900,9 @@ index f376f3bf623dc5332315cf0a0dfcf9fe81c0c7c1..55793205703586f373c9a30c51bf12d0
 +    };
 +    assert_eq!(assessment.outcome, GuardianAssessmentOutcome::Allow);
 +    assert_eq!(assessment.rationale, "rate limit retry succeeded");
-+    // A generic HTTP 429 is terminal at the sampling-request layer as
-+    // `CodexErr::RetryLimit`; each response therefore exhausts one Guardian
-+    // session attempt before the bounded Guardian loop retries the review.
-+    assert_eq!(metadata.attempt_count, 3);
++    // The first Guardian attempt consumes its two-request HTTP retry budget;
++    // the bounded Guardian loop then starts a second review attempt.
++    assert_eq!(metadata.attempt_count, 2);
 +    assert!(matches!(
 +        metadata.guardian_session_kind,
 +        Some(codex_analytics::GuardianReviewSessionKind::TrunkReused)
@@ -1642,20 +1914,85 @@ index f376f3bf623dc5332315cf0a0dfcf9fe81c0c7c1..55793205703586f373c9a30c51bf12d0
  #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
  async fn guardian_review_does_not_retry_missing_assessment_payload() -> anyhow::Result<()> {
      skip_if_no_network!(Ok(()));
+@@ -3248,6 +3421,62 @@ async fn guardian_review_exhausts_three_failures_with_one_terminal_event() -> an
+     Ok(())
+ }
+ 
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn guardian_review_exhausts_transient_http_failures_with_one_terminal_event() -> anyhow::Result<()>
++{
++    skip_if_no_network!(Ok(()));
++
++    let server = start_mock_server().await;
++    let overload = || {
++        wiremock::ResponseTemplate::new(503).set_body_json(serde_json::json!({
++            "error": {
++                "code": "server_is_overloaded",
++                "message": "persistent reviewer overload",
++            }
++        }))
++    };
++    let request_log = mount_response_sequence(
++        &server,
++        vec![
++            overload(),
++            overload(),
++            overload(),
++            overload(),
++            overload(),
++            overload(),
++        ],
++    )
++    .await;
++    let (session, turn, rx) = guardian_test_session_turn_and_rx(&server).await;
++    seed_guardian_parent_history(&session, &turn).await;
++
++    let decision = review_approval_request(
++        &session,
++        &turn,
++        "review-exhausted-transient-retry".to_string(),
++        guardian_exec_command_request("shell-exhausted-transient-retry"),
++        ApprovalRequestReasons::default(),
++    )
++    .await;
++
++    assert!(matches!(decision, ReviewDecision::Denied { .. }));
++    assert_eq!(request_log.requests().len(), 6);
++    let mut statuses = Vec::new();
++    while let Ok(event) = rx.try_recv() {
++        if let EventMsg::GuardianAssessment(event) = event.msg {
++            statuses.push(event.status);
++        }
++    }
++    assert_eq!(
++        statuses,
++        vec![
++            GuardianAssessmentStatus::InProgress,
++            GuardianAssessmentStatus::Denied,
++        ]
++    );
++    Ok(())
++}
++
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+ async fn guardian_review_does_not_retry_valid_denial() -> anyhow::Result<()> {
+     skip_if_no_network!(Ok(()));
 diff --git a/codex-rs/core/src/hook_runtime.rs b/codex-rs/core/src/hook_runtime.rs
-index c9fe099332b7ec68ca892d6366cdf3155519b96a..2ae4d77def702175db897799370cbd3933fd1e67 100644
+index 4964905418..7d98af4102 100644
 --- a/codex-rs/core/src/hook_runtime.rs
 +++ b/codex-rs/core/src/hook_runtime.rs
-@@ -557,7 +557,7 @@ pub(crate) async fn inspect_pending_input(
+@@ -686,7 +686,9 @@ pub(crate) async fn inspect_pending_input(
              )
              .await
          }
--        TurnInput::ResponseItem(_) => HookRuntimeOutcome {
-+        TurnInput::DisplayItem(_) | TurnInput::ResponseItem(_) => HookRuntimeOutcome {
+-        TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_) => HookRuntimeOutcome {
++        TurnInput::DisplayItem(_)
++        | TurnInput::ResponseItem(_)
++        | TurnInput::FunctionCallOutput(_) => HookRuntimeOutcome {
              should_stop: false,
              additional_contexts: Vec::new(),
          },
-@@ -583,6 +583,10 @@ pub(crate) async fn record_pending_input(
+@@ -714,6 +716,10 @@ pub(crate) async fn record_pending_input(
              )
              .await;
          }
@@ -1664,120 +2001,29 @@ index c9fe099332b7ec68ca892d6366cdf3155519b96a..2ae4d77def702175db897799370cbd39
 +            sess.emit_turn_item_completed(turn_context, *item).await;
 +        }
          TurnInput::ResponseItem(item) => {
-             sess.record_conversation_items(turn_context, std::slice::from_ref(&item))
+             sess.record_annotated_conversation_items(turn_context, vec![item])
                  .await;
-diff --git a/codex-rs/core/src/session/handlers.rs b/codex-rs/core/src/session/handlers.rs
-index 23d24c3f5ce5faa8dd8175ab0e26469d2d4ed1a6..90e38543ad8bd74c58f118ea64ef5ba38d606807 100644
---- a/codex-rs/core/src/session/handlers.rs
-+++ b/codex-rs/core/src/session/handlers.rs
-@@ -59,6 +59,77 @@ use tracing::debug;
- use tracing::info;
- use tracing::warn;
- 
-+struct ClientInputReservation<'a> {
-+    session: &'a Session,
-+}
-+
-+impl<'a> ClientInputReservation<'a> {
-+    fn enter(session: &'a Session) -> Self {
-+        session
-+            .client_input_reservations
-+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-+        Self { session }
-+    }
-+}
-+
-+impl Drop for ClientInputReservation<'_> {
-+    fn drop(&mut self) {
-+        let previous = self
-+            .session
-+            .client_input_reservations
-+            .fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
-+        assert!(previous > 0, "client input reservation underflow");
-+    }
-+}
-+
-+#[cfg(test)]
-+#[derive(Clone, Default)]
-+pub(super) struct ClientInputEntryTestGate {
-+    reached: Arc<tokio::sync::Notify>,
-+    release: Arc<tokio::sync::Notify>,
-+}
-+
-+#[cfg(test)]
-+impl ClientInputEntryTestGate {
-+    pub(super) async fn wait_until_reached(&self) {
-+        self.reached.notified().await;
-+    }
-+
-+    pub(super) fn release(&self) {
-+        self.release.notify_one();
-+    }
-+}
-+
-+#[cfg(test)]
-+static CLIENT_INPUT_ENTRY_TEST_GATES: std::sync::LazyLock<
-+    std::sync::Mutex<std::collections::HashMap<String, ClientInputEntryTestGate>>,
-+> = std::sync::LazyLock::new(Default::default);
-+
-+#[cfg(test)]
-+impl Session {
-+    pub(super) fn install_client_input_entry_test_gate(&self, gate: ClientInputEntryTestGate) {
-+        let previous = CLIENT_INPUT_ENTRY_TEST_GATES
-+            .lock()
-+            .unwrap_or_else(std::sync::PoisonError::into_inner)
-+            .insert(self.thread_id.to_string(), gate);
-+        assert!(
-+            previous.is_none(),
-+            "client input entry test gate already installed"
-+        );
-+    }
-+
-+    async fn wait_at_client_input_entry_test_gate(&self) {
-+        let gate = CLIENT_INPUT_ENTRY_TEST_GATES
-+            .lock()
-+            .unwrap_or_else(std::sync::PoisonError::into_inner)
-+            .remove(&self.thread_id.to_string());
-+        if let Some(gate) = gate {
-+            gate.reached.notify_one();
-+            gate.release.notified().await;
-+        }
-+    }
-+}
-+
- pub async fn interrupt(sess: &Arc<Session>) {
-     sess.interrupt_task().await;
- }
-@@ -180,6 +251,7 @@ pub(super) async fn user_input_or_turn_inner(
-     op: Op,
-     client_user_message_id: Option<String>,
- ) {
-+    let _client_input_reservation = ClientInputReservation::enter(sess);
-     let Op::UserInput {
-         items,
-         final_output_json_schema,
-@@ -190,6 +262,8 @@ pub(super) async fn user_input_or_turn_inner(
-     else {
-         unreachable!();
-     };
-+    #[cfg(test)]
-+    sess.wait_at_client_input_entry_test_gate().await;
-     let emit_thread_settings_applied = thread_settings != ThreadSettingsOverrides::default();
-     let mut updates = if emit_thread_settings_applied {
-         thread_settings_update(sess, thread_settings).await
 diff --git a/codex-rs/core/src/session/inject.rs b/codex-rs/core/src/session/inject.rs
-index 3e086964c391d899f927fbf7cce8f141c6517aa9..6ba97954fb1bdb583bc5e7b4fd1ef86af5f86e22 100644
+index 6c103f266c..645d7cecc5 100644
 --- a/codex-rs/core/src/session/inject.rs
 +++ b/codex-rs/core/src/session/inject.rs
-@@ -6,11 +6,58 @@ use crate::codex_thread::TryStartTurnIfIdleRejectionReason;
- use crate::state::ActiveTurn;
- use crate::state::TurnState;
- use crate::tasks::RegularTask;
+@@ -1,12 +1,66 @@
+ use super::TurnInput as PendingTurnInput;
+ use super::session::Session;
+ use super::turn_context::TurnContext;
++use crate::codex_thread::TryStartTurnIfIdleError;
++use crate::codex_thread::TryStartTurnIfIdleRejectionReason;
++use crate::state::ActiveTurn;
++use crate::state::TurnState;
++use crate::tasks::RegularTask;
 +use codex_extension_api::AutomaticTurnOrigin;
- use codex_protocol::config_types::ModeKind;
+ use codex_features::Feature;
+ use codex_history::CodexHarnessMetadata;
+ use codex_history::ResponseItemEnvelope;
++use codex_protocol::config_types::ModeKind;
 +use codex_protocol::items::TurnItem;
  use codex_protocol::models::ResponseItem;
- use std::sync::Arc;
++use std::sync::Arc;
 +use std::sync::atomic::Ordering;
 +
 +#[cfg(test)]
@@ -1828,8 +2074,8 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..6ba97954fb1bdb583bc5e7b4fd1ef86a
      /// Returns the input if there is no active turn to inject into.
      #[expect(
          clippy::await_holding_invalid_type,
-@@ -35,6 +82,37 @@ impl Session {
-         }
+@@ -64,6 +118,249 @@ impl Session {
+         Ok(())
      }
  
 +    /// Injects only if the expected turn is active at the enqueue point.
@@ -1857,19 +2103,26 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..6ba97954fb1bdb583bc5e7b4fd1ef86a
 +        self.input_queue
 +            .extend_pending_input_and_accept_mailbox_delivery_for_turn_state(
 +                active_turn.turn_state.as_ref(),
-+                input.into_iter().map(TurnInput::ResponseItem).collect(),
++                input
++                    .into_iter()
++                    .map(ResponseItemEnvelope::new)
++                    .map(PendingTurnInput::ResponseItem)
++                    .collect(),
 +            )
 +            .await;
 +        Ok(())
 +    }
 +
-     /// Starts a regular turn with the provided items only if automatic idle work
-     /// is allowed for the current session state.
-     ///
-@@ -45,10 +123,62 @@ impl Session {
-     pub(crate) async fn try_start_turn_if_idle(
-         self: &Arc<Self>,
-         input: Vec<ResponseItem>,
++    /// Starts a regular turn with the provided items only if automatic idle work
++    /// is allowed for the current session state.
++    ///
++    /// This is the shared gate for extension-initiated idle work. It refuses to
++    /// start a turn when user/client-triggered work is queued, any task is still
++    /// active, or the session is currently in Plan mode. Active Review tasks are
++    /// covered by the active-task check because Review turns are not steerable.
++    pub(crate) async fn try_start_turn_if_idle(
++        self: &Arc<Self>,
++        input: Vec<ResponseItem>,
 +    ) -> Result<(), TryStartTurnIfIdleError> {
 +        self.try_start_turn_if_idle_inner(
 +            /*expected_idle_epoch*/ None,
@@ -1916,23 +2169,31 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..6ba97954fb1bdb583bc5e7b4fd1ef86a
 +        automatic_turn_origin: AutomaticTurnOrigin,
 +        display_items: Vec<TurnItem>,
 +        input: Vec<ResponseItem>,
-     ) -> Result<(), TryStartTurnIfIdleError> {
-         if input.is_empty() {
-             return Ok(());
-         }
-+        if self.client_input_reservations.load(Ordering::Acquire) != 0 {
++    ) -> Result<(), TryStartTurnIfIdleError> {
++        if input.is_empty() {
++            return Ok(());
++        }
++        if self.has_client_input_reservations() {
 +            return Err(TryStartTurnIfIdleError::new(
 +                TryStartTurnIfIdleRejectionReason::Busy,
 +                input,
 +            ));
 +        }
-         if self.input_queue.has_trigger_turn_mailbox_items().await {
-             return Err(TryStartTurnIfIdleError::new(
-                 TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
-@@ -64,14 +194,33 @@ impl Session {
- 
-         let turn_state = {
-             let mut active_turn = self.active_turn.lock().await;
++        if self.input_queue.has_trigger_turn_mailbox_items().await {
++            return Err(TryStartTurnIfIdleError::new(
++                TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
++                input,
++            ));
++        }
++        if self.collaboration_mode().await.mode == ModeKind::Plan {
++            return Err(TryStartTurnIfIdleError::new(
++                TryStartTurnIfIdleRejectionReason::PlanMode,
++                input,
++            ));
++        }
++
++        let turn_state = {
++            let mut active_turn = self.active_turn.lock().await;
 +            if expected_idle_epoch
 +                .is_some_and(|expected| self.idle_epoch.load(Ordering::Acquire) != expected)
 +            {
@@ -1941,15 +2202,13 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..6ba97954fb1bdb583bc5e7b4fd1ef86a
 +                    input,
 +                ));
 +            }
-             if active_turn.is_some() {
-                 return Err(TryStartTurnIfIdleError::new(
-                     TryStartTurnIfIdleRejectionReason::Busy,
-                     input,
-                 ));
-             }
--            let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
--            Arc::clone(&active_turn.turn_state)
-+            if self.client_input_reservations.load(Ordering::Acquire) != 0 {
++            if active_turn.is_some() {
++                return Err(TryStartTurnIfIdleError::new(
++                    TryStartTurnIfIdleRejectionReason::Busy,
++                    input,
++                ));
++            }
++            if self.has_client_input_reservations() {
 +                return Err(TryStartTurnIfIdleError::new(
 +                    TryStartTurnIfIdleRejectionReason::Busy,
 +                    input,
@@ -1962,53 +2221,73 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..6ba97954fb1bdb583bc5e7b4fd1ef86a
 +            let turn_state = Arc::clone(&reservation.turn_state);
 +            *active_turn = Some(reservation);
 +            turn_state
-         };
- 
-         if self.input_queue.has_trigger_turn_mailbox_items().await {
-@@ -84,7 +233,10 @@ impl Session {
-         }
- 
-         let turn_context = self
--            .new_default_turn_with_sub_id(uuid::Uuid::new_v4().to_string())
++        };
++
++        if self.input_queue.has_trigger_turn_mailbox_items().await {
++            self.clear_reserved_idle_turn(&turn_state).await;
++            self.maybe_start_turn_for_pending_work().await;
++            return Err(TryStartTurnIfIdleError::new(
++                TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
++                input,
++            ));
++        }
++
++        let turn_context = self
 +            .new_default_turn_with_sub_id_and_origin(
 +                uuid::Uuid::new_v4().to_string(),
 +                automatic_turn_origin,
 +            )
-             .await;
-         if turn_context.mode == ModeKind::Plan {
-             self.clear_reserved_idle_turn(&turn_state).await;
-@@ -107,7 +259,9 @@ impl Session {
-         let still_reserved = {
-             let active_turn = self.active_turn.lock().await;
-             active_turn.as_ref().is_some_and(|active_turn| {
--                active_turn.task.is_none() && Arc::ptr_eq(&active_turn.turn_state, &turn_state)
++            .await;
++        if turn_context.mode == ModeKind::Plan {
++            self.clear_reserved_idle_turn(&turn_state).await;
++            self.maybe_start_turn_for_pending_work().await;
++            return Err(TryStartTurnIfIdleError::new(
++                TryStartTurnIfIdleRejectionReason::PlanMode,
++                input,
++            ));
++        }
++        self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
++            .await;
++        if self.input_queue.has_trigger_turn_mailbox_items().await {
++            self.clear_reserved_idle_turn(&turn_state).await;
++            self.maybe_start_turn_for_pending_work().await;
++            return Err(TryStartTurnIfIdleError::new(
++                TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
++                input,
++            ));
++        }
++        let still_reserved = {
++            let active_turn = self.active_turn.lock().await;
++            active_turn.as_ref().is_some_and(|active_turn| {
 +                active_turn.idle_reservation
 +                    && active_turn.task.is_none()
 +                    && Arc::ptr_eq(&active_turn.turn_state, &turn_state)
-             })
-         };
-         if !still_reserved {
-@@ -118,20 +272,43 @@ impl Session {
-             ));
-         }
- 
++            })
++        };
++        if !still_reserved {
++            self.clear_reserved_idle_turn(&turn_state).await;
++            return Err(TryStartTurnIfIdleError::new(
++                TryStartTurnIfIdleRejectionReason::Busy,
++                input,
++            ));
++        }
++
 +        let rejected_input = input.clone();
 +        let mut pending_input = Vec::with_capacity(display_items.len() + input.len());
 +        pending_input.extend(
 +            display_items
 +                .into_iter()
-+                .map(|item| TurnInput::DisplayItem(Box::new(item))),
++                .map(|item| PendingTurnInput::DisplayItem(Box::new(item))),
 +        );
-+        pending_input.extend(input.into_iter().map(TurnInput::ResponseItem));
-         self.input_queue
--            .extend_pending_input_for_turn_state(
--                turn_state.as_ref(),
--                input.into_iter().map(TurnInput::ResponseItem).collect(),
--            )
--            .await;
--        self.start_task(turn_context, Vec::new(), RegularTask::new())
++        pending_input.extend(
++            input
++                .into_iter()
++                .map(ResponseItemEnvelope::new)
++                .map(PendingTurnInput::ResponseItem),
++        );
++        self.input_queue
 +            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_input)
-             .await;
++            .await;
 +        #[cfg(test)]
 +        self.wait_at_idle_start_test_gate().await;
 +        if !self
@@ -2028,90 +2307,48 @@ index 3e086964c391d899f927fbf7cce8f141c6517aa9..6ba97954fb1bdb583bc5e7b4fd1ef86a
 +                rejected_input,
 +            ));
 +        }
-         Ok(())
-     }
- 
-     async fn clear_reserved_idle_turn(&self, turn_state: &Arc<tokio::sync::Mutex<TurnState>>) {
-         let mut active_turn_guard = self.active_turn.lock().await;
-         if let Some(active_turn) = active_turn_guard.as_ref()
++        Ok(())
++    }
++
++    async fn clear_reserved_idle_turn(&self, turn_state: &Arc<tokio::sync::Mutex<TurnState>>) {
++        let mut active_turn_guard = self.active_turn.lock().await;
++        if let Some(active_turn) = active_turn_guard.as_ref()
 +            && active_turn.idle_reservation
-             && active_turn.task.is_none()
-             && Arc::ptr_eq(&active_turn.turn_state, turn_state)
-         {
++            && active_turn.task.is_none()
++            && Arc::ptr_eq(&active_turn.turn_state, turn_state)
++        {
++            *active_turn_guard = None;
++        }
++    }
++
+     /// Preserves trusted client provenance while items wait for an active turn.
+     #[expect(
+         clippy::await_holding_invalid_type,
 diff --git a/codex-rs/core/src/session/input_queue.rs b/codex-rs/core/src/session/input_queue.rs
-index 3992f44d4af9d397ad9daf228e0213c4642e82cd..c58c7069c61b9cff8e8b2af2c13a4b93d9eb962d 100644
+index e6bd3ba388..b73af52005 100644
 --- a/codex-rs/core/src/session/input_queue.rs
 +++ b/codex-rs/core/src/session/input_queue.rs
-@@ -1,6 +1,7 @@
- use crate::state::ActiveTurn;
- use crate::state::MailboxDeliveryPhase;
- use crate::state::TurnState;
+@@ -4,6 +4,7 @@ use crate::state::TurnState;
+ use codex_diagnostics::Gauge;
+ use codex_diagnostics::GaugeGuard;
+ use codex_history::ResponseItemEnvelope;
 +use codex_protocol::items::TurnItem;
  use codex_protocol::models::ResponseItem;
  use codex_protocol::protocol::InterAgentCommunication;
- use codex_protocol::user_input::UserInput;
-@@ -9,12 +10,13 @@ use std::sync::Arc;
- use tokio::sync::Mutex;
- use tokio::sync::watch;
- 
--#[derive(Clone, Debug, PartialEq)]
-+#[derive(Clone, Debug)]
- pub(crate) enum TurnInput {
-     UserInput {
-         content: Vec<UserInput>,
-         client_id: Option<String>,
-     },
+ use codex_protocol::turn_input::TurnStartOptions;
+@@ -28,6 +29,7 @@ pub enum TurnInput {
+     // Preserve the existing serialized format while carrying injection API metadata
+     // through the in-memory queue.
+     ResponseItem(#[serde(with = "turn_input_response_item")] ResponseItemEnvelope),
 +    DisplayItem(Box<TurnItem>),
-     ResponseItem(ResponseItem),
      InterAgentCommunication(InterAgentCommunication),
  }
-@@ -394,13 +396,16 @@ mod tests {
-             .enqueue_mailbox_communication(mail_two.clone())
-             .await;
  
--        assert_eq!(
--            input_queue.drain_mailbox_input_items().await,
--            vec![
--                TurnInput::InterAgentCommunication(mail_one),
--                TurnInput::InterAgentCommunication(mail_two)
--            ]
--        );
-+        let input = input_queue.drain_mailbox_input_items().await;
-+        let [
-+            TurnInput::InterAgentCommunication(actual_mail_one),
-+            TurnInput::InterAgentCommunication(actual_mail_two),
-+        ] = input.as_slice()
-+        else {
-+            panic!("expected two mailbox communications");
-+        };
-+        assert_eq!(actual_mail_one, &mail_one);
-+        assert_eq!(actual_mail_two, &mail_two);
-         assert!(!input_queue.has_pending_mailbox_items().await);
-     }
- 
-diff --git a/codex-rs/core/src/session/mod.rs b/codex-rs/core/src/session/mod.rs
-index 5fc6c628d9b292f8b4ab869778e67b56ffa56ba6..ee5ed4e8ed7946e17909ca902ea3bbfff17e70a5 100644
---- a/codex-rs/core/src/session/mod.rs
-+++ b/codex-rs/core/src/session/mod.rs
-@@ -3877,6 +3877,13 @@ impl Session {
-         let Some(active_task) = active_turn.task.as_ref() else {
-             return Err(SteerInputError::NoActiveTurn(input));
-         };
-+        if active_task
-+            .turn_context
-+            .automatic_turn_origin
-+            .is_extension("shadow")
-+        {
-+            return Err(SteerInputError::NoActiveTurn(input));
-+        }
-         let active_turn_id = &active_task.turn_context.sub_id;
- 
-         if let Some(expected_turn_id) = expected_turn_id
 diff --git a/codex-rs/core/src/session/review.rs b/codex-rs/core/src/session/review.rs
-index 9a89c1beeb5c79c35fd2cc05736e3a510c48fd00..80cdd80ba6a3f650e4cb9329e4df831c4251d0ec 100644
+index cf7392ca26..abe62e3b3d 100644
 --- a/codex-rs/core/src/session/review.rs
 +++ b/codex-rs/core/src/session/review.rs
-@@ -123,6 +123,7 @@ pub(super) async fn spawn_review_thread(
+@@ -157,6 +157,7 @@ pub(super) async fn spawn_review_thread(
          history_mode: parent_turn_context.history_mode,
          parent_thread_id: parent_turn_context.parent_thread_id,
          originator: parent_turn_context.originator.clone(),
@@ -2120,15 +2357,43 @@ index 9a89c1beeb5c79c35fd2cc05736e3a510c48fd00..80cdd80ba6a3f650e4cb9329e4df831c
          available_models,
          unified_exec_shell_mode,
 diff --git a/codex-rs/core/src/session/session.rs b/codex-rs/core/src/session/session.rs
-index 910ade583bd94917fa4b784e0ab8b15eae0e688b..6a56478eb7dd3b8249f3452a2d1979ebd76e0e05 100644
+index 6d1953e3a2..3aaeebfe78 100644
 --- a/codex-rs/core/src/session/session.rs
 +++ b/codex-rs/core/src/session/session.rs
-@@ -46,6 +46,12 @@ pub(crate) struct Session {
-     pub(crate) services: SessionServices,
-     pub(super) git_enrichment_policy: GitEnrichmentPolicy,
+@@ -36,6 +36,26 @@ use codex_utils_git_discovery::GitRootDiscovery;
+ use std::sync::OnceLock;
+ use tokio::sync::Semaphore;
+ 
++const AUTOMATIC_TURN_ADMISSION_CLAIM: u64 = 1 << 63;
++const CLIENT_INPUT_RESERVATION_MASK: u64 = AUTOMATIC_TURN_ADMISSION_CLAIM - 1;
++
++pub(crate) struct AutomaticTurnAdmissionGuard<'a> {
++    state: &'a AtomicU64,
++}
++
++impl Drop for AutomaticTurnAdmissionGuard<'_> {
++    fn drop(&mut self) {
++        let previous = self.state.fetch_and(
++            CLIENT_INPUT_RESERVATION_MASK,
++            std::sync::atomic::Ordering::AcqRel,
++        );
++        assert!(
++            previous & AUTOMATIC_TURN_ADMISSION_CLAIM != 0,
++            "automatic turn admission claim was not held"
++        );
++    }
++}
++
+ /// Context for an initialized model agent
+ ///
+ /// A session has at most 1 running task at a time, and can be interrupted by user input.
+@@ -75,6 +95,13 @@ pub(crate) struct Session {
+     pub(super) fork_persistence: ForkPersistence,
+     pub(super) forked_from_ordinal_exclusive: Option<u64>,
      pub(super) next_internal_sub_id: AtomicU64,
-+    /// Client user-input handlers that have entered the session but have not
-+    /// yet committed their steer or replacement turn.
++    /// Atomic admission state shared by entered client-input handlers and the
++    /// final automatic-turn installation boundary. The high bit is reserved
++    /// for an automatic admission claim; the remaining bits count client input.
 +    pub(crate) client_input_reservations: AtomicU64,
 +    pub(crate) idle_epoch: AtomicU64,
 +    pub(crate) last_completed_turn:
@@ -2136,8 +2401,70 @@ index 910ade583bd94917fa4b784e0ab8b15eae0e688b..6a56478eb7dd3b8249f3452a2d1979eb
  }
  
  #[derive(Clone)]
-@@ -472,6 +478,11 @@ impl Session {
-         state.session_configuration.originator.clone()
+@@ -592,6 +619,61 @@ async fn warm_plugins_and_skills_for_session_init(
+ }
+ 
+ impl Session {
++    pub(crate) fn has_client_input_reservations(&self) -> bool {
++        self.client_input_reservations
++            .load(std::sync::atomic::Ordering::Acquire)
++            & CLIENT_INPUT_RESERVATION_MASK
++            != 0
++    }
++
++    pub(crate) fn reserve_client_input(&self) {
++        let result = self.client_input_reservations.fetch_update(
++            std::sync::atomic::Ordering::AcqRel,
++            std::sync::atomic::Ordering::Acquire,
++            |state| {
++                let reservations = state & CLIENT_INPUT_RESERVATION_MASK;
++                if reservations == CLIENT_INPUT_RESERVATION_MASK {
++                    None
++                } else {
++                    Some(state + 1)
++                }
++            },
++        );
++        assert!(result.is_ok(), "client input reservation overflow");
++    }
++
++    pub(crate) fn release_client_input(&self) {
++        let result = self.client_input_reservations.fetch_update(
++            std::sync::atomic::Ordering::AcqRel,
++            std::sync::atomic::Ordering::Acquire,
++            |state| {
++                let reservations = state & CLIENT_INPUT_RESERVATION_MASK;
++                if reservations == 0 {
++                    None
++                } else {
++                    Some(state - 1)
++                }
++            },
++        );
++        assert!(result.is_ok(), "client input reservation underflow");
++    }
++
++    pub(crate) fn try_claim_automatic_turn_admission(
++        &self,
++    ) -> Option<AutomaticTurnAdmissionGuard<'_>> {
++        self.client_input_reservations
++            .compare_exchange(
++                0,
++                AUTOMATIC_TURN_ADMISSION_CLAIM,
++                std::sync::atomic::Ordering::AcqRel,
++                std::sync::atomic::Ordering::Acquire,
++            )
++            .ok()
++            .map(|_| AutomaticTurnAdmissionGuard {
++                state: &self.client_input_reservations,
++            })
++    }
++
+     /// Returns the concrete identity for this thread.
+     pub(crate) fn thread_id(&self) -> ThreadId {
+         self.thread_id
+@@ -634,6 +716,11 @@ impl Session {
+         }
      }
  
 +    pub(crate) async fn extension_conversation_history(&self) -> codex_tools::ConversationHistory {
@@ -2148,9 +2475,9 @@ index 910ade583bd94917fa4b784e0ab8b15eae0e688b..6a56478eb7dd3b8249f3452a2d1979eb
      #[instrument(name = "session_init", level = "info", skip_all)]
      #[allow(clippy::too_many_arguments)]
      pub(crate) async fn new(
-@@ -1153,6 +1164,9 @@ impl Session {
-                 services,
-                 git_enrichment_policy,
+@@ -1515,6 +1602,9 @@ impl Session {
+                 fork_persistence,
+                 forked_from_ordinal_exclusive,
                  next_internal_sub_id: AtomicU64::new(0),
 +                client_input_reservations: AtomicU64::new(0),
 +                idle_epoch: AtomicU64::new(0),
@@ -2159,28 +2486,37 @@ index 910ade583bd94917fa4b784e0ab8b15eae0e688b..6a56478eb7dd3b8249f3452a2d1979eb
              if let Some(network_policy_decider_session) = network_policy_decider_session {
                  let mut guard = network_policy_decider_session.write().await;
 diff --git a/codex-rs/core/src/session/tests.rs b/codex-rs/core/src/session/tests.rs
-index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e2310482ea37 100644
+index b5931b330e..8b18fac920 100644
 --- a/codex-rs/core/src/session/tests.rs
 +++ b/codex-rs/core/src/session/tests.rs
-@@ -33,6 +33,9 @@ use codex_config::types::ToolSuggestDisabledTool;
- use codex_core_skills::HostSkillsSnapshot;
- use core_test_support::test_codex::local_selections;
+@@ -42,6 +42,9 @@ use codex_config::types::ToolSuggestDisabledTool;
+ use codex_config::types::WindowsSandboxModeToml;
+ use core_test_support::test_codex::TurnInputRequest as ExternalTurnInputRequest;
  
 +use codex_extension_api::AutomaticTurnOrigin;
 +use codex_extension_items::ExtensionItem;
 +use codex_extension_items::shadow::ShadowReportItem;
  use codex_features::Feature;
- use codex_http_client::HttpClientFactory;
- use codex_http_client::OutboundProxyPolicy;
-@@ -77,6 +80,7 @@ use crate::connectors::AppInfo;
+ use codex_file_system::FileSystemSandboxContext;
+ use codex_http_client::ClientRouteClass;
+@@ -88,6 +91,7 @@ use codex_protocol::protocol::TurnEnvironmentSelections;
+ use codex_protocol::request_permissions::PermissionGrantScope;
+ use codex_protocol::request_permissions::RequestPermissionProfile;
+ use codex_protocol::turn_input::TurnInput as SubmittedTurnInput;
++use codex_protocol::turn_input::NotSubmittedReason;
+ use codex_protocol::turn_input::TurnInputMode;
+ use codex_protocol::turn_input::TurnInputRequest;
+ use codex_protocol::turn_input::TurnInputSubmission;
+@@ -100,6 +104,8 @@ use crate::connectors::AppInfo;
  use crate::rollout::recorder::RolloutRecorder;
  use crate::state::ActiveTurn;
  use crate::state::TaskKind;
++use crate::tasks::AutomaticTurnAdmissionTestGate;
 +use crate::tasks::PendingWorkStartTestGate;
  use crate::tasks::SessionTask;
- use crate::tasks::SessionTaskContext;
  use crate::tasks::SessionTaskResult;
-@@ -227,6 +231,43 @@ fn user_message(text: &str) -> ResponseItem {
+ use crate::tasks::UserShellCommandMode;
+@@ -312,6 +318,43 @@ fn user_message(text: &str) -> ResponseItem {
      }
  }
  
@@ -2224,116 +2560,131 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
  #[test]
  fn assign_missing_response_item_ids_assigns_agent_message_ids() {
      let items = Cow::Owned(vec![
-@@ -5538,6 +5579,9 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
-         services,
-         git_enrichment_policy: GitEnrichmentPolicy::Fresh,
-         next_internal_sub_id: AtomicU64::new(0),
-+        client_input_reservations: AtomicU64::new(0),
-+        idle_epoch: AtomicU64::new(0),
-+        last_completed_turn: Mutex::new(None),
-     };
+@@ -11898,6 +11941,835 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
+     assert_eq!(0, calls.load(std::sync::atomic::Ordering::SeqCst));
+ }
  
-     (session, turn_context)
-@@ -7700,6 +7744,9 @@ where
-         services,
-         git_enrichment_policy: GitEnrichmentPolicy::Fresh,
-         next_internal_sub_id: AtomicU64::new(0),
-+        client_input_reservations: AtomicU64::new(0),
-+        idle_epoch: AtomicU64::new(0),
-+        last_completed_turn: Mutex::new(None),
-     });
- 
-     (session, turn_context, rx_event)
-@@ -9919,7 +9966,7 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
- 
- #[tokio::test]
- async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
--    let (sess, tc, _rx) = make_session_and_context_with_rx().await;
++#[tokio::test]
++async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
 +    let (sess, tc, rx) = make_session_and_context_with_rx().await;
-     sess.spawn_task(
-         Arc::clone(&tc),
-         Vec::new(),
-@@ -9931,17 +9978,26 @@ async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
-     .await;
- 
-     let item = user_message("synthetic idle input");
++    sess.spawn_task(
++        Arc::clone(&tc),
++        Vec::new(),
++        NeverEndingTask {
++            kind: TaskKind::Regular,
++            listen_to_cancellation_token: true,
++        },
++    )
++    .await;
++
++    let item = user_message("synthetic idle input");
 +    let display_item = shadow_report_turn_item("shadow-busy");
-     let err = sess
--        .try_start_turn_if_idle(vec![item.clone()])
++    let err = sess
 +        .try_start_turn_if_idle_for_epoch_with_origin(
 +            sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire),
 +            AutomaticTurnOrigin::Extension("shadow".to_owned()),
 +            vec![display_item.clone()],
 +            vec![item.clone()],
 +        )
-         .await
-         .expect_err("active turn should reject idle-only input");
- 
-     assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, err.reason());
-     assert_eq!(vec![item], err.into_input());
--    assert_eq!(
--        Vec::<TurnInput>::new(),
--        sess.input_queue.get_pending_input(&sess.active_turn).await
++        .await
++        .expect_err("active turn should reject idle-only input");
++
++    assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, err.reason());
++    assert_eq!(vec![item], err.into_input());
 +    assert!(
 +        sess.input_queue
 +            .get_pending_input(&sess.active_turn)
 +            .await
 +            .is_empty()
-     );
++    );
 +    assert!(!drain_contains_item_lifecycle(&rx, &display_item));
- 
-     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
- }
-@@ -9965,15 +10021,17 @@ async fn try_start_turn_if_idle_rejects_plan_mode_without_injecting() {
-     assert_eq!(TryStartTurnIfIdleRejectionReason::PlanMode, err.reason());
-     assert_eq!(vec![item], err.into_input());
-     assert!(sess.active_turn.lock().await.is_none());
--    assert_eq!(
--        Vec::<TurnInput>::new(),
--        sess.input_queue.get_pending_input(&sess.active_turn).await
++
++    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
++}
++
++#[tokio::test]
++async fn try_start_turn_if_idle_rejects_plan_mode_without_injecting() {
++    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
++    let mut collaboration_mode = sess.collaboration_mode().await;
++    collaboration_mode.mode = ModeKind::Plan;
++    {
++        let mut state = sess.state.lock().await;
++        state.session_configuration.collaboration_mode = collaboration_mode;
++    }
++
++    let item = user_message("synthetic idle input");
++    let err = sess
++        .try_start_turn_if_idle(vec![item.clone()])
++        .await
++        .expect_err("plan mode should reject automatic idle input");
++
++    assert_eq!(TryStartTurnIfIdleRejectionReason::PlanMode, err.reason());
++    assert_eq!(vec![item], err.into_input());
++    assert!(sess.active_turn.lock().await.is_none());
 +    assert!(
 +        sess.input_queue
 +            .get_pending_input(&sess.active_turn)
 +            .await
 +            .is_empty()
-     );
- }
- 
- #[tokio::test]
- async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting() {
--    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
++    );
++}
++
++#[tokio::test]
++async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting() {
 +    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
-     sess.input_queue
-         .enqueue_mailbox_communication(InterAgentCommunication::new(
-             AgentPath::root(),
-@@ -9985,8 +10043,14 @@ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting()
-         .await;
- 
-     let item = user_message("synthetic idle input");
++    sess.input_queue
++        .enqueue_mailbox_communication(InterAgentCommunication::new(
++            AgentPath::root(),
++            AgentPath::root(),
++            Vec::new(),
++            "pending trigger".to_string(),
++            /*trigger_turn*/ true,
++        ))
++        .await;
++
++    let item = user_message("synthetic idle input");
 +    let display_item = shadow_report_turn_item("shadow-pending");
-     let err = sess
--        .try_start_turn_if_idle(vec![item.clone()])
++    let err = sess
 +        .try_start_turn_if_idle_for_epoch_with_origin(
 +            sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire),
 +            AutomaticTurnOrigin::Extension("shadow".to_owned()),
 +            vec![display_item.clone()],
 +            vec![item.clone()],
 +        )
-         .await
-         .expect_err("pending trigger-turn mail should reject automatic idle input");
- 
-@@ -9997,6 +10061,7 @@ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting()
-     assert_eq!(vec![item], err.into_input());
-     assert!(sess.active_turn.lock().await.is_none());
-     assert!(sess.input_queue.has_trigger_turn_mailbox_items().await);
++        .await
++        .expect_err("pending trigger-turn mail should reject automatic idle input");
++
++    assert_eq!(
++        TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
++        err.reason()
++    );
++    assert_eq!(vec![item], err.into_input());
++    assert!(sess.active_turn.lock().await.is_none());
++    assert!(sess.input_queue.has_trigger_turn_mailbox_items().await);
 +    assert!(!drain_contains_item_lifecycle(&rx, &display_item));
- }
- 
- #[tokio::test]
-@@ -10020,11 +10085,420 @@ async fn try_start_turn_if_idle_rejects_active_review_turn_without_injecting() {
- 
-     assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, err.reason());
-     assert_eq!(vec![item], err.into_input());
++}
++
++#[tokio::test]
++async fn try_start_turn_if_idle_rejects_active_review_turn_without_injecting() {
++    let (sess, tc, _rx) = make_session_and_context_with_rx().await;
++    sess.spawn_task(
++        Arc::clone(&tc),
++        Vec::new(),
++        NeverEndingTask {
++            kind: TaskKind::Review,
++            listen_to_cancellation_token: true,
++        },
++    )
++    .await;
++
++    let item = user_message("synthetic idle input");
++    let err = sess
++        .try_start_turn_if_idle(vec![item.clone()])
++        .await
++        .expect_err("active review turn should reject automatic idle input");
++
++    assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, err.reason());
++    assert_eq!(vec![item], err.into_input());
 +    assert!(
 +        sess.input_queue
 +            .get_pending_input(&sess.active_turn)
@@ -2423,13 +2774,11 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
 +        .as_ref()
 +        .and_then(|active_turn| active_turn.task.as_ref())
 +        .map(|task| task.turn_context.automatic_turn_origin.clone());
-     assert_eq!(
--        Vec::<TurnInput>::new(),
--        sess.input_queue.get_pending_input(&sess.active_turn).await
++    assert_eq!(
 +        active_origin,
 +        Some(AutomaticTurnOrigin::Extension("shadow".to_owned()))
-     );
- 
++    );
++
 +    let duplicate = sess
 +        .try_start_turn_if_idle_for_epoch_with_origin(
 +            sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire),
@@ -2559,6 +2908,124 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
 +    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 +}
 +
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn client_input_registered_before_automatic_claim_rejects_shadow_without_lifecycle() {
++    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
++    let automatic_gate = AutomaticTurnAdmissionTestGate::default();
++    sess.install_automatic_turn_admission_test_gate(automatic_gate.clone());
++    let client_gate = super::turn_input::ClientInputEntryTestGate::default();
++    sess.install_client_input_entry_test_gate(client_gate.clone());
++
++    let idle_epoch = sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire);
++    let display_item = shadow_report_turn_item("shadow-admission-race");
++    let idle_session = Arc::clone(&sess);
++    let idle_display_item = display_item.clone();
++    let idle_start = tokio::spawn(async move {
++        idle_session
++            .try_start_turn_if_idle_for_epoch_with_origin(
++                idle_epoch,
++                AutomaticTurnOrigin::Extension("shadow".to_owned()),
++                vec![idle_display_item],
++                vec![user_message("shadow report")],
++            )
++            .await
++    });
++
++    timeout(
++        StdDuration::from_secs(2),
++        automatic_gate.wait_until_reached(),
++    )
++    .await
++    .expect("automatic turn should reach its final admission boundary");
++
++    let user_session = Arc::clone(&sess);
++    let user_input = tokio::spawn(async move {
++        turn_input::handle(
++            &user_session,
++            TurnInputRequest::user_input(vec![UserInput::Text {
++                text: "client input wins admission".to_owned(),
++                text_elements: Vec::new(),
++            }]),
++            TurnInputMode::StartOrSteer,
++            "admission-winning-user-turn".to_owned(),
++        )
++        .await
++        .expect("client input should be valid")
++    });
++    timeout(StdDuration::from_secs(2), client_gate.wait_until_reached())
++        .await
++        .expect("client input should register before automatic admission");
++
++    automatic_gate.release();
++    let idle_error = timeout(StdDuration::from_secs(2), idle_start)
++        .await
++        .expect("automatic admission should finish after the gate opens")
++        .expect("automatic admission must not panic")
++        .expect_err("registered client input must win automatic admission");
++    assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, idle_error.reason());
++
++    while let Ok(event) = rx.try_recv() {
++        match event.msg {
++            EventMsg::TurnStarted(_) => {
++                panic!("rejected Shadow admission emitted turnStarted")
++            }
++            EventMsg::ItemStarted(ItemStartedEvent { item, .. })
++            | EventMsg::ItemCompleted(ItemCompletedEvent { item, .. })
++                if shadow_report_turn_item_matches(&item, &display_item) =>
++            {
++                panic!("rejected Shadow admission emitted item lifecycle")
++            }
++            _ => {}
++        }
++    }
++
++    client_gate.release();
++    let submission = timeout(StdDuration::from_secs(2), user_input)
++        .await
++        .expect("client input handler should finish after the gate opens")
++        .expect("client input handler should not panic");
++    assert_eq!(
++        submission,
++        TurnInputSubmission::Started {
++            turn_id: "admission-winning-user-turn".to_owned(),
++        }
++    );
++
++    let active_turn = sess
++        .active_turn
++        .lock()
++        .await
++        .as_ref()
++        .and_then(|active_turn| active_turn.task.as_ref())
++        .map(|task| {
++            (
++                task.turn_context.sub_id.clone(),
++                task.turn_context.automatic_turn_origin.clone(),
++            )
++        });
++    let active_or_completed_turn = match active_turn {
++        Some(active_turn) => active_turn,
++        None => {
++            let terminal = recv_terminal_event(&rx, TerminalEventKind::TurnComplete).await;
++            assert_eq!(terminal.id, "admission-winning-user-turn");
++            sess.last_completed_turn
++                .lock()
++                .await
++                .clone()
++                .expect("completed user turn should record its origin")
++        }
++    };
++    assert_eq!(
++        active_or_completed_turn,
++        (
++            "admission-winning-user-turn".to_owned(),
++            AutomaticTurnOrigin::Unspecified,
++        )
++    );
++
++    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
++}
++
 +#[tokio::test]
 +async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_replacement() {
 +    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
@@ -2570,7 +3037,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
 +        /*trigger_turn*/ true,
 +    );
 +    sess.input_queue
-+        .enqueue_mailbox_communication(trigger_communication.clone())
++        .enqueue_mailbox_communication(trigger_communication.clone(), Default::default())
 +        .await;
 +
 +    let gate = PendingWorkStartTestGate::default();
@@ -2598,18 +3065,16 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
 +        },
 +    )
 +    .await;
-+    sess.steer_input(
++    let submission = submit_steer_only(
++        &sess,
 +        vec![UserInput::Text {
 +            text: "user pending input".to_owned(),
 +            text_elements: Vec::new(),
 +        }],
-+        /*additional_context*/ Default::default(),
-+        Some(&user_turn.sub_id),
-+        /*client_user_message_id*/ None,
-+        /*responsesapi_client_metadata*/ None,
++        &user_turn.sub_id,
 +    )
-+    .await
-+    .expect("replacement user turn should accept pending input");
++    .await;
++    assert!(matches!(submission, TurnInputSubmission::Steered { .. }));
 +
 +    gate.release();
 +    timeout(StdDuration::from_secs(2), pending_work_start)
@@ -2675,27 +3140,28 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
 +#[tokio::test]
 +async fn try_start_turn_if_idle_rejects_in_flight_client_user_input() {
 +    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
-+    let gate = super::handlers::ClientInputEntryTestGate::default();
++    let gate = super::turn_input::ClientInputEntryTestGate::default();
 +    sess.install_client_input_entry_test_gate(gate.clone());
 +    let idle_epoch = sess.idle_epoch.load(std::sync::atomic::Ordering::Acquire);
 +    let user_session = Arc::clone(&sess);
 +    let user_input = tokio::spawn(async move {
-+        handlers::user_input_or_turn_inner(
++        let submission = turn_input::handle(
 +            &user_session,
++            TurnInputRequest::user_input(vec![UserInput::Text {
++                text: "client input already entered".to_owned(),
++                text_elements: Vec::new(),
++            }]),
++            TurnInputMode::StartOrSteer,
 +            "in-flight-user-turn".to_owned(),
-+            Op::UserInput {
-+                items: vec![UserInput::Text {
-+                    text: "client input already entered".to_owned(),
-+                    text_elements: Vec::new(),
-+                }],
-+                final_output_json_schema: None,
-+                responsesapi_client_metadata: None,
-+                additional_context: Default::default(),
-+                thread_settings: Default::default(),
-+            },
-+            /*client_user_message_id*/ None,
 +        )
-+        .await;
++        .await
++        .expect("client input should be valid");
++        assert_eq!(
++            submission,
++            TurnInputSubmission::Started {
++                turn_id: "in-flight-user-turn".to_owned(),
++            }
++        );
 +    });
 +
 +    tokio::time::timeout(StdDuration::from_secs(2), gate.wait_until_reached())
@@ -2750,13 +3216,26 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
 +            AutomaticTurnOrigin::Unspecified,
 +        )
 +    );
-     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
- }
- 
-@@ -10050,6 +10524,77 @@ async fn steer_input_requires_active_turn() {
-     assert!(matches!(err, SteerInputError::NoActiveTurn(_)));
- }
- 
++    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
++}
++
++#[tokio::test]
++async fn steer_input_requires_active_turn() {
++    let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
++    let input = vec![UserInput::Text {
++        text: "steer".to_string(),
++        text_elements: Vec::new(),
++    }];
++
++    let submission = submit_steer_only(&sess, input, "missing-turn").await;
++    assert_eq!(
++        submission,
++        TurnInputSubmission::NotSubmitted {
++            reason: NotSubmittedReason::NoActiveTurn,
++        }
++    );
++}
++
 +#[tokio::test]
 +async fn steer_input_suppresses_only_shadow_automatic_turns() {
 +    for origin in [
@@ -2777,20 +3256,21 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
 +        )
 +        .await;
 +
-+        let active_turn_id = sess
-+            .steer_input(
-+                vec![UserInput::Text {
-+                    text: "steer non-Shadow extension".to_owned(),
-+                    text_elements: Vec::new(),
-+                }],
-+                /*additional_context*/ Default::default(),
-+                Some(&turn_context.sub_id),
-+                /*client_user_message_id*/ None,
-+                /*responsesapi_client_metadata*/ None,
-+            )
-+            .await
-+            .expect("non-Shadow automatic turns should remain steerable");
-+        assert_eq!(active_turn_id, turn_context.sub_id);
++        let submission = submit_steer_only(
++            &sess,
++            vec![UserInput::Text {
++                text: "steer non-Shadow extension".to_owned(),
++                text_elements: Vec::new(),
++            }],
++            &turn_context.sub_id,
++        )
++        .await;
++        assert_eq!(
++            submission,
++            TurnInputSubmission::Steered {
++                turn_id: turn_context.sub_id.clone(),
++            }
++        );
 +        sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 +    }
 +
@@ -2811,27 +3291,112 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
 +    )
 +    .await;
 +
-+    let err = sess
-+        .steer_input(
-+            vec![UserInput::Text {
-+                text: "do not steer Shadow".to_owned(),
-+                text_elements: Vec::new(),
-+            }],
-+            /*additional_context*/ Default::default(),
-+            Some(&shadow_turn.sub_id),
-+            /*client_user_message_id*/ None,
-+            /*responsesapi_client_metadata*/ None,
-+        )
-+        .await
-+        .expect_err("Shadow automatic turns should reject steering");
-+    assert!(matches!(err, SteerInputError::NoActiveTurn(_)));
++    let submission = submit_steer_only(
++        &sess,
++        vec![UserInput::Text {
++            text: "do not steer Shadow".to_owned(),
++            text_elements: Vec::new(),
++        }],
++        &shadow_turn.sub_id,
++    )
++    .await;
++    assert_eq!(
++        submission,
++        TurnInputSubmission::NotSubmitted {
++            reason: NotSubmittedReason::NoActiveTurn,
++        }
++    );
 +    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 +}
 +
++#[tokio::test]
++async fn steer_input_enforces_expected_turn_id() {
++    let (sess, tc, _rx) = make_session_and_context_with_rx().await;
++    let input = vec![TurnInput::UserInput {
++        content: vec![UserInput::Text {
++            text: "hello".to_string(),
++            text_elements: Vec::new(),
++        }],
++        client_id: None,
++    }];
++    sess.spawn_task(
++        Arc::clone(&tc),
++        input,
++        NeverEndingTask {
++            kind: TaskKind::Regular,
++            listen_to_cancellation_token: false,
++        },
++    )
++    .await;
++
++    let steer_input = vec![UserInput::Text {
++        text: "steer".to_string(),
++        text_elements: Vec::new(),
++    }];
++    let submission = submit_steer_only(&sess, steer_input, "different-turn-id").await;
++
++    match submission {
++        TurnInputSubmission::NotSubmitted {
++            reason: NotSubmittedReason::ExpectedTurnMismatch { expected, actual },
++        } => {
++            assert_eq!(
++                (expected, actual),
++                ("different-turn-id".to_string(), tc.sub_id.clone())
++            );
++        }
++        other => panic!("unexpected error: {other:?}"),
++    }
++}
++
++#[tokio::test]
++async fn steer_input_rejects_non_regular_turns() {
++    for (task_kind, turn_kind) in [
++        (TaskKind::Review, NonSteerableTurnKind::Review),
++        (TaskKind::Compact, NonSteerableTurnKind::Compact),
++    ] {
++        let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
++        let input = vec![TurnInput::UserInput {
++            content: vec![UserInput::Text {
++                text: "hello".to_string(),
++                text_elements: Vec::new(),
++            }],
++            client_id: None,
++        }];
++        let turn_context = sess.new_default_turn_with_sub_id("turn".to_string()).await;
++        sess.spawn_task(
++            turn_context,
++            input,
++            NeverEndingTask {
++                kind: task_kind,
++                listen_to_cancellation_token: true,
++            },
++        )
++        .await;
++
++        let submission = submit_steer_only(
++            &sess,
++            vec![UserInput::Text {
++                text: "steer".to_string(),
++                text_elements: Vec::new(),
++            }],
++            "turn",
++        )
++        .await;
++        assert_eq!(
++            submission,
++            TurnInputSubmission::NotSubmitted {
++                reason: NotSubmittedReason::ActiveTurnNotSteerable { turn_kind },
++            }
++        );
++
++        sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
++    }
++}
++
  #[tokio::test]
- async fn steer_input_enforces_expected_turn_id() {
-     let (sess, tc, _rx) = make_session_and_context_with_rx().await;
-@@ -10208,12 +10753,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
+ async fn abort_empty_active_turn_preserves_pending_input() {
+     let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
+@@ -11925,12 +12797,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
      sess.abort_all_tasks(TurnAbortReason::Replaced).await;
  
      assert!(sess.active_turn.lock().await.is_none());
@@ -2839,7 +3404,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
 -        sess.input_queue
 -            .take_pending_input_for_turn_state(turn_state.as_ref())
 -            .await,
--        vec![TurnInput::ResponseItem(pending_item)]
+-        vec![TurnInput::ResponseItem(pending_item.into())]
 -    );
 +    let pending_input = sess
 +        .input_queue
@@ -2852,24 +3417,24 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
  }
  
  async fn set_total_token_usage(sess: &Session, total_token_usage: TokenUsage) {
-@@ -10256,17 +10803,21 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
+@@ -11973,20 +12847,21 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
          !sess.input_queue.has_pending_input(&sess.active_turn).await,
          "queue-only mailbox mail should stay buffered once the current turn emitted its answer"
      );
 -    assert_eq!(
--        sess.input_queue.get_pending_input(&sess.active_turn).await,
--        Vec::new()
 +    assert!(
-+        sess.input_queue
-+            .get_pending_input(&sess.active_turn)
-+            .await
+         sess.input_queue
+             .get_pending_input(&sess.active_turn)
+             .await
+-            .0,
+-        Vec::new()
 +            .is_empty()
      );
  
      sess.abort_all_tasks(TurnAbortReason::Replaced).await;
  
 -    assert_eq!(
--        sess.input_queue.get_pending_input(&sess.active_turn).await,
+-        (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
 -        vec![TurnInput::InterAgentCommunication(communication)],
 -    );
 +    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
@@ -2881,9 +3446,9 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
  }
  
  #[tokio::test]
-@@ -10344,19 +10895,23 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
-     .await
-     .expect("steered input should be accepted");
+@@ -12125,19 +13000,23 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
+     .await;
+     assert!(matches!(submission, TurnInputSubmission::Steered { .. }));
  
 +    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
 +    let [
@@ -2894,14 +3459,14 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
 +        panic!("expected steered input followed by mailbox communication");
 +    };
      assert_eq!(
--        sess.input_queue.get_pending_input(&sess.active_turn).await,
+-        (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
 -        vec![
 -            TurnInput::UserInput {
 -                content: vec![UserInput::Text {
 -                    text: "follow up".to_string(),
 -                    text_elements: Vec::new(),
 -                }],
--                client_id: None
+-                client_id: None,
 -            },
 -            TurnInput::InterAgentCommunication(communication),
 -        ],
@@ -2916,7 +3481,7 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
  }
  
  #[tokio::test]
-@@ -10402,19 +10957,23 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
+@@ -12181,19 +13060,23 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
          .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
          .await;
  
@@ -2929,14 +3494,14 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
 +        panic!("expected steered input followed by mailbox communication");
 +    };
      assert_eq!(
--        sess.input_queue.get_pending_input(&sess.active_turn).await,
+-        (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
 -        vec![
 -            TurnInput::UserInput {
 -                content: vec![UserInput::Text {
 -                    text: "follow up".to_string(),
 -                    text_elements: Vec::new(),
 -                }],
--                client_id: None
+-                client_id: None,
 -            },
 -            TurnInput::InterAgentCommunication(communication),
 -        ],
@@ -2951,12 +3516,12 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
  }
  
  #[tokio::test]
-@@ -10466,10 +11025,12 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
+@@ -12246,10 +13129,12 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
  
      assert!(output.needs_follow_up);
      assert!(output.tool_future.is_some());
 -    assert_eq!(
--        sess.input_queue.get_pending_input(&sess.active_turn).await,
+-        (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
 -        vec![TurnInput::InterAgentCommunication(communication)],
 -    );
 +    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
@@ -2969,44 +3534,42 @@ index 8a3321ccd09e90caa3f4ab6cfb383aadf6360234..7b886b144da7e7c9aedb3adc9bf0e231
  
  #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 diff --git a/codex-rs/core/src/session/turn.rs b/codex-rs/core/src/session/turn.rs
-index 63ccba77235a160c3f43e5ccf3bce7e99ad02b31..a26c3bbe338cd1eae368f1bf38266ccc24eb562d 100644
+index f7c42680c2..1cd2e70d08 100644
 --- a/codex-rs/core/src/session/turn.rs
 +++ b/codex-rs/core/src/session/turn.rs
-@@ -553,7 +553,9 @@ async fn build_skills_and_plugins(
-         .iter()
-         .filter_map(|item| match item {
-             TurnInput::UserInput { content, .. } => Some(content.as_slice()),
--            TurnInput::ResponseItem(_) | TurnInput::InterAgentCommunication(_) => None,
-+            TurnInput::DisplayItem(_)
-+            | TurnInput::ResponseItem(_)
-+            | TurnInput::InterAgentCommunication(_) => None,
-         })
-         .flatten()
-         .cloned()
-@@ -790,7 +792,9 @@ async fn track_turn_resolved_config_analytics(
+@@ -1003,7 +1003,8 @@ async fn track_turn_resolved_config_analytics(
                  .iter()
                  .filter_map(|item| match item {
                      TurnInput::UserInput { content, .. } => Some(content.as_slice()),
--                    TurnInput::ResponseItem(_) | TurnInput::InterAgentCommunication(_) => None,
+-                    TurnInput::ResponseItem(_)
 +                    TurnInput::DisplayItem(_)
 +                    | TurnInput::ResponseItem(_)
-+                    | TurnInput::InterAgentCommunication(_) => None,
+                     | TurnInput::FunctionCallOutput(_)
+                     | TurnInput::InterAgentCommunication(_) => None,
                  })
-                 .flatten()
-                 .filter(|item| {
 diff --git a/codex-rs/core/src/session/turn_context.rs b/codex-rs/core/src/session/turn_context.rs
-index a30a4535407277dec98ec2ddfa035f74cf9cb3a1..c0001f87625715750b8dc458c7d8a50607fa2ad6 100644
+index e5a371e9d0..d67b95ccd7 100644
 --- a/codex-rs/core/src/session/turn_context.rs
 +++ b/codex-rs/core/src/session/turn_context.rs
-@@ -2,6 +2,7 @@ use super::*;
- use crate::environment_selection::TurnEnvironmentSnapshot;
- use crate::shell_snapshot::ShellSnapshotFile;
- use codex_core_skills::HostSkillsSnapshot;
+@@ -12,7 +12,9 @@ use arc_swap::ArcSwap;
+ use codex_core_plugins::PluginCommandAttribution;
+ use codex_core_plugins::ResolvedPluginMetricsOperation;
+ use codex_core_plugins::TrustedPluginRoots;
++use codex_core_skills::HostSkillsSnapshot;
+ use codex_exec_server::ExecutorFileSystem;
 +use codex_extension_api::AutomaticTurnOrigin;
  use codex_file_system::FileSystemSandboxContext;
  use codex_model_provider::SharedModelProvider;
- use codex_model_provider::create_model_provider;
-@@ -125,6 +126,7 @@ pub struct TurnContext {
+ use codex_protocol::SessionId;
+@@ -187,6 +189,7 @@ impl std::fmt::Debug for TurnEnvironment {
+ pub(crate) struct NewTurnContextOptions {
+     pub(crate) final_output_json_schema: Option<Value>,
+     pub(crate) cyber_access_program: Option<CyberAccessProgram>,
++    pub(crate) automatic_turn_origin: AutomaticTurnOrigin,
+ }
+ 
+ /// The context needed for a single turn of the thread.
+@@ -216,6 +219,7 @@ pub struct TurnContext {
      pub(crate) history_mode: ThreadHistoryMode,
      pub(crate) parent_thread_id: Option<ThreadId>,
      pub(crate) originator: String,
@@ -3014,7 +3577,7 @@ index a30a4535407277dec98ec2ddfa035f74cf9cb3a1..c0001f87625715750b8dc458c7d8a506
      pub(crate) environments: TurnEnvironmentSnapshot,
      /// The session's absolute working directory. All relative paths provided
      /// by the model as well as sandbox policies are resolved against this path
-@@ -283,6 +285,7 @@ impl TurnContext {
+@@ -525,6 +529,7 @@ impl TurnContext {
              history_mode: self.history_mode,
              parent_thread_id: self.parent_thread_id,
              originator: self.originator.clone(),
@@ -3022,7 +3585,7 @@ index a30a4535407277dec98ec2ddfa035f74cf9cb3a1..c0001f87625715750b8dc458c7d8a506
              environments: self.environments.clone(),
              #[allow(deprecated)]
              cwd: self.cwd.clone(),
-@@ -561,6 +564,7 @@ impl Session {
+@@ -797,6 +802,7 @@ impl Session {
              history_mode: session_configuration.history_mode,
              parent_thread_id: session_configuration.parent_thread_id,
              originator: session_configuration.originator.clone(),
@@ -3030,80 +3593,175 @@ index a30a4535407277dec98ec2ddfa035f74cf9cb3a1..c0001f87625715750b8dc458c7d8a506
              environments,
              #[allow(deprecated)]
              cwd,
-@@ -658,6 +662,7 @@ impl Session {
-                 sub_id,
-                 session_configuration,
-                 updates.final_output_json_schema,
-+                AutomaticTurnOrigin::Unspecified,
-             )
-             .await)
-     }
-@@ -667,11 +672,13 @@ impl Session {
-         sub_id: String,
-         session_configuration: SessionConfiguration,
-         final_output_json_schema: Option<Option<Value>>,
-+        automatic_turn_origin: AutomaticTurnOrigin,
-     ) -> Arc<TurnContext> {
-         self.new_turn_context_from_configuration(
-             sub_id,
-             session_configuration,
-             final_output_json_schema,
-+            automatic_turn_origin,
-             TurnMultiAgentRuntime::ResolveAndStore,
-             self.git_enrichment_policy,
-         )
-@@ -687,6 +694,7 @@ impl Session {
-             sub_id,
-             session_configuration,
-             /*final_output_json_schema*/ None,
-+            AutomaticTurnOrigin::Unspecified,
-             TurnMultiAgentRuntime::Preview,
-             GitEnrichmentPolicy::Skip,
-         )
-@@ -699,6 +707,7 @@ impl Session {
-         sub_id: String,
-         session_configuration: SessionConfiguration,
-         final_output_json_schema: Option<Option<Value>>,
-+        automatic_turn_origin: AutomaticTurnOrigin,
-         multi_agent_runtime: TurnMultiAgentRuntime,
-         git_enrichment_policy: GitEnrichmentPolicy,
-     ) -> Arc<TurnContext> {
-@@ -789,6 +798,7 @@ impl Session {
-             sub_id,
-             skills_snapshot,
+@@ -1022,6 +1028,7 @@ impl Session {
          );
-+        turn_context.automatic_turn_origin = automatic_turn_origin;
+         turn_context.code_mode_available = self.services.code_mode_service.is_available();
+         turn_context.extension_data.insert(trusted_plugin_roots);
++        turn_context.automatic_turn_origin = options.automatic_turn_origin;
          turn_context.realtime_active = self.conversation.running_state().await.is_some();
  
-         if let Some(final_schema) = final_output_json_schema {
-@@ -839,6 +849,22 @@ impl Session {
-             sub_id,
-             session_configuration,
-             /*final_output_json_schema*/ None,
-+            AutomaticTurnOrigin::Unspecified,
-+        )
-+        .await
-+    }
-+
+         turn_context.final_output_json_schema = options.final_output_json_schema;
+@@ -1097,6 +1104,21 @@ impl Session {
+             .await
+     }
+ 
 +    pub(crate) async fn new_default_turn_with_sub_id_and_origin(
 +        &self,
 +        sub_id: String,
 +        automatic_turn_origin: AutomaticTurnOrigin,
 +    ) -> Arc<TurnContext> {
-+        let session_configuration = self.default_turn_configuration().await;
-+        self.new_turn_from_configuration(
++        self.new_turn_with_default_settings(
 +            sub_id,
-+            session_configuration,
-+            /*final_output_json_schema*/ None,
-+            automatic_turn_origin,
-         )
-         .await
++            NewTurnContextOptions {
++                automatic_turn_origin,
++                ..Default::default()
++            },
++        )
++        .await
++    }
++
+     pub(crate) async fn new_startup_prewarm_turn_with_sub_id(
+         &self,
+         sub_id: String,
+diff --git a/codex-rs/core/src/session/turn_input.rs b/codex-rs/core/src/session/turn_input.rs
+index 2882931bca..01e55d0741 100644
+--- a/codex-rs/core/src/session/turn_input.rs
++++ b/codex-rs/core/src/session/turn_input.rs
+@@ -18,6 +18,7 @@ use super::turn_context::TurnContext;
+ use crate::state::ActiveTurn;
+ use crate::state::TurnState;
+ use crate::tasks::RegularTask;
++use codex_extension_api::AutomaticTurnOrigin;
+ use codex_protocol::config_types::ModeKind;
+ use codex_protocol::error::CodexErr;
+ use codex_protocol::error::Result as CodexResult;
+@@ -73,6 +74,86 @@ impl TurnStartKind {
      }
+ }
+ 
++struct ClientInputReservation<'a> {
++    session: &'a Session,
++}
++
++impl<'a> ClientInputReservation<'a> {
++    fn enter_for_request(
++        session: &'a Session,
++        request: &TurnInputRequest,
++        mode: &TurnInputMode,
++    ) -> Option<Self> {
++        let reserves_client_input = match mode {
++            TurnInputMode::StartOrSteer | TurnInputMode::Steer { .. } => true,
++            TurnInputMode::StartIfIdle => {
++                matches!(
++                    &request.input,
++                    SubmittedTurnInput::UserInput { content, .. } if !content.is_empty()
++                )
++            }
++        };
++        reserves_client_input.then(|| {
++            session.reserve_client_input();
++            Self { session }
++        })
++    }
++}
++
++impl Drop for ClientInputReservation<'_> {
++    fn drop(&mut self) {
++        self.session.release_client_input();
++    }
++}
++
++#[cfg(test)]
++#[derive(Clone, Default)]
++pub(super) struct ClientInputEntryTestGate {
++    reached: Arc<tokio::sync::Notify>,
++    release: Arc<tokio::sync::Notify>,
++}
++
++#[cfg(test)]
++impl ClientInputEntryTestGate {
++    pub(super) async fn wait_until_reached(&self) {
++        self.reached.notified().await;
++    }
++
++    pub(super) fn release(&self) {
++        self.release.notify_one();
++    }
++}
++
++#[cfg(test)]
++static CLIENT_INPUT_ENTRY_TEST_GATES: std::sync::LazyLock<
++    std::sync::Mutex<std::collections::HashMap<String, ClientInputEntryTestGate>>,
++> = std::sync::LazyLock::new(Default::default);
++
++#[cfg(test)]
++impl Session {
++    pub(super) fn install_client_input_entry_test_gate(&self, gate: ClientInputEntryTestGate) {
++        let previous = CLIENT_INPUT_ENTRY_TEST_GATES
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .insert(self.thread_id.to_string(), gate);
++        assert!(
++            previous.is_none(),
++            "client input entry test gate already installed"
++        );
++    }
++
++    async fn wait_at_client_input_entry_test_gate(&self) {
++        let gate = CLIENT_INPUT_ENTRY_TEST_GATES
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .remove(&self.thread_id.to_string());
++        if let Some(gate) = gate {
++            gate.reached.notify_one();
++            gate.release.notified().await;
++        }
++    }
++}
++
+ /// Thread settings and start-only options prepared before Core knows whether
+ /// turn input starts or steers.
+ ///
+@@ -140,6 +221,7 @@ impl PreparedTurnInputSettings {
+         let options = NewTurnContextOptions {
+             final_output_json_schema,
+             cyber_access_program,
++            automatic_turn_origin: AutomaticTurnOrigin::Unspecified,
+         };
+         let turn_context = match kind {
+             TurnStartKind::User | TurnStartKind::Recovery => Some(
+@@ -200,6 +282,12 @@ pub(super) async fn handle(
+     mode: TurnInputMode,
+     submission_id: String,
+ ) -> CodexResult<TurnInputSubmission> {
++    let _client_input_reservation =
++        ClientInputReservation::enter_for_request(session, &request, &mode);
++    #[cfg(test)]
++    if _client_input_reservation.is_some() {
++        session.wait_at_client_input_entry_test_gate().await;
++    }
+     match mode {
+         TurnInputMode::StartOrSteer => start_or_steer(session, request, submission_id).await,
+         TurnInputMode::StartIfIdle => {
+@@ -565,6 +653,13 @@ impl Session {
+         let Some(active_task) = active_turn.task.as_ref() else {
+             return Err(NotSubmittedReason::NoActiveTurn);
+         };
++        if active_task
++            .turn_context
++            .automatic_turn_origin
++            .is_extension("shadow")
++        {
++            return Err(NotSubmittedReason::NoActiveTurn);
++        }
+         let active_turn_id = &active_task.turn_context.sub_id;
+ 
+         if let Some(expected_turn_id) = expected_turn_id
 diff --git a/codex-rs/core/src/state/turn.rs b/codex-rs/core/src/state/turn.rs
-index d1e31b79949f5df181e2cfabde27c0bb38a2c458..a2f892671401d967897bdd83215c44235ff71be9 100644
+index c61e6431e9..b7b1dcdc84 100644
 --- a/codex-rs/core/src/state/turn.rs
 +++ b/codex-rs/core/src/state/turn.rs
-@@ -30,6 +30,10 @@ use codex_protocol::protocol::TokenUsage;
+@@ -33,6 +33,10 @@ use codex_protocol::protocol::TokenUsage;
  pub(crate) struct ActiveTurn {
      pub(crate) task: Option<RunningTask>,
      pub(crate) turn_state: Arc<Mutex<TurnState>>,
@@ -3114,7 +3772,7 @@ index d1e31b79949f5df181e2cfabde27c0bb38a2c458..a2f892671401d967897bdd83215c4423
  }
  
  /// Whether mailbox deliveries should still be folded into the current turn.
-@@ -58,6 +62,7 @@ impl Default for ActiveTurn {
+@@ -61,6 +65,7 @@ impl Default for ActiveTurn {
          Self {
              task: None,
              turn_state: Arc::new(Mutex::new(TurnState::default())),
@@ -3123,11 +3781,10 @@ index d1e31b79949f5df181e2cfabde27c0bb38a2c458..a2f892671401d967897bdd83215c4423
      }
  }
 diff --git a/codex-rs/core/src/tasks/lifecycle.rs b/codex-rs/core/src/tasks/lifecycle.rs
-index 789955df1321c8941bb80979f472dbef7492ba23..40d8721b5071aa62abd8f87e3601886551af2d0a 100644
+index cde3fc7d72..0c83717c21 100644
 --- a/codex-rs/core/src/tasks/lifecycle.rs
 +++ b/codex-rs/core/src/tasks/lifecycle.rs
-@@ -1,7 +1,7 @@
--use codex_extension_api::ExtensionData;
+@@ -3,6 +3,7 @@ use codex_extension_api::ThreadIdleCause;
  use codex_protocol::protocol::CodexErrorInfo;
  use codex_protocol::protocol::TokenUsage;
  use codex_protocol::protocol::TurnAbortReason;
@@ -3135,7 +3792,7 @@ index 789955df1321c8941bb80979f472dbef7492ba23..40d8721b5071aa62abd8f87e36018865
  
  use crate::session::session::Session;
  use crate::session::turn_context::TurnContext;
-@@ -12,6 +12,7 @@ impl Session {
+@@ -13,6 +14,7 @@ impl Session {
          turn_context: &TurnContext,
          token_usage_at_turn_start: &TokenUsage,
      ) {
@@ -3143,7 +3800,7 @@ index 789955df1321c8941bb80979f472dbef7492ba23..40d8721b5071aa62abd8f87e36018865
          let collaboration_mode = turn_context.collaboration_mode();
          for contributor in self.services.extensions.turn_lifecycle_contributors() {
              contributor
-@@ -27,7 +28,12 @@ impl Session {
+@@ -28,7 +30,12 @@ impl Session {
          }
      }
  
@@ -3157,7 +3814,7 @@ index 789955df1321c8941bb80979f472dbef7492ba23..40d8721b5071aa62abd8f87e36018865
          for contributor in self.services.extensions.turn_lifecycle_contributors() {
              contributor
                  .on_turn_stop(codex_extension_api::TurnStopInput {
-@@ -46,9 +52,16 @@ impl Session {
+@@ -56,10 +63,17 @@ impl Session {
              return;
          }
  
@@ -3167,6 +3824,7 @@ index 789955df1321c8941bb80979f472dbef7492ba23..40d8721b5071aa62abd8f87e36018865
          for contributor in self.services.extensions.thread_lifecycle_contributors() {
              contributor
                  .on_thread_idle(codex_extension_api::ThreadIdleInput {
+                     cause,
 +                    completed_turn_id: completed_turn.as_ref().map(|(id, _)| id.as_str()),
 +                    completed_turn_origin: completed_turn.as_ref().map(|(_, origin)| origin),
 +                    idle_epoch,
@@ -3174,7 +3832,7 @@ index 789955df1321c8941bb80979f472dbef7492ba23..40d8721b5071aa62abd8f87e36018865
                      session_store: &self.services.session_extension_data,
                      thread_store: &self.services.thread_extension_data,
                  })
-@@ -59,8 +72,13 @@ impl Session {
+@@ -70,8 +84,13 @@ impl Session {
      pub(super) async fn emit_turn_abort_lifecycle(
          &self,
          reason: TurnAbortReason,
@@ -3190,18 +3848,10 @@ index 789955df1321c8941bb80979f472dbef7492ba23..40d8721b5071aa62abd8f87e36018865
              contributor
                  .on_turn_abort(codex_extension_api::TurnAbortInput {
 diff --git a/codex-rs/core/src/tasks/mod.rs b/codex-rs/core/src/tasks/mod.rs
-index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc811d35b5 100644
+index 5bf41019d5..14025fea88 100644
 --- a/codex-rs/core/src/tasks/mod.rs
 +++ b/codex-rs/core/src/tasks/mod.rs
-@@ -34,6 +34,7 @@ use crate::session::turn_context::TurnContext;
- use crate::state::ActiveTurn;
- use crate::state::RunningTask;
- use crate::state::TaskKind;
-+use crate::state::TurnState;
- use codex_analytics::TurnProfileFact;
- use codex_analytics::TurnTokenUsageFact;
- use codex_login::AuthManager;
-@@ -310,7 +311,60 @@ where
+@@ -267,7 +267,110 @@ where
      }
  }
  
@@ -3219,6 +3869,24 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc
 +}
 +
 +#[cfg(test)]
++#[derive(Clone, Default)]
++pub(crate) struct AutomaticTurnAdmissionTestGate {
++    reached: Arc<Notify>,
++    release: Arc<Notify>,
++}
++
++#[cfg(test)]
++impl AutomaticTurnAdmissionTestGate {
++    pub(crate) async fn wait_until_reached(&self) {
++        self.reached.notified().await;
++    }
++
++    pub(crate) fn release(&self) {
++        self.release.notify_one();
++    }
++}
++
++#[cfg(test)]
 +impl PendingWorkStartTestGate {
 +    pub(crate) async fn wait_until_reached(&self) {
 +        self.reached.notified().await;
@@ -3232,6 +3900,11 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc
 +#[cfg(test)]
 +static PENDING_WORK_START_TEST_GATES: std::sync::LazyLock<
 +    std::sync::Mutex<std::collections::HashMap<String, PendingWorkStartTestGate>>,
++> = std::sync::LazyLock::new(Default::default);
++
++#[cfg(test)]
++static AUTOMATIC_TURN_ADMISSION_TEST_GATES: std::sync::LazyLock<
++    std::sync::Mutex<std::collections::HashMap<String, AutomaticTurnAdmissionTestGate>>,
 +> = std::sync::LazyLock::new(Default::default);
 +
  impl Session {
@@ -3259,10 +3932,37 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc
 +        }
 +    }
 +
++    #[cfg(test)]
++    pub(crate) fn install_automatic_turn_admission_test_gate(
++        &self,
++        gate: AutomaticTurnAdmissionTestGate,
++    ) {
++        let previous = AUTOMATIC_TURN_ADMISSION_TEST_GATES
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .insert(self.thread_id.to_string(), gate);
++        assert!(
++            previous.is_none(),
++            "automatic turn admission test gate already installed"
++        );
++    }
++
++    #[cfg(test)]
++    async fn wait_at_automatic_turn_admission_test_gate(&self) {
++        let gate = AUTOMATIC_TURN_ADMISSION_TEST_GATES
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .remove(&self.thread_id.to_string());
++        if let Some(gate) = gate {
++            gate.reached.notify_one();
++            gate.release.notified().await;
++        }
++    }
++
      pub async fn spawn_task<T: SessionTask>(
          self: &Arc<Self>,
          turn_context: Arc<TurnContext>,
-@@ -328,6 +382,38 @@ impl Session {
+@@ -285,9 +388,125 @@ impl Session {
          input: Vec<TurnInput>,
          task: T,
      ) {
@@ -3301,16 +4001,7 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc
          let task: Arc<dyn AnySessionTask> = Arc::new(task);
          let task_kind = task.kind();
          let span_name = task.span_name();
-@@ -350,13 +436,88 @@ impl Session {
-             .await
-             .clear_turn(&turn_context.sub_id);
- 
--        let pending_items = self.input_queue.get_pending_input(&self.active_turn).await;
--        let turn_state = {
--            let mut active = self.active_turn.lock().await;
--            let turn = active.get_or_insert_with(ActiveTurn::default);
--            debug_assert!(turn.task.is_none());
--            Arc::clone(&turn.turn_state)
++
 +        // A pending-work reservation keeps the active-turn guard until its task is installed.
 +        // This makes the ownership check, pending-input extraction, and installation one handoff.
 +        let pending_work_active_turn = match &ownership {
@@ -3329,32 +4020,37 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc
 +            }
 +            TaskStartOwnership::Available | TaskStartOwnership::IdleReservation(_) => None,
 +        };
-+        let pending_items = match &ownership {
++        let (pending_items, start_options) = match &ownership {
 +            TaskStartOwnership::Available => {
 +                self.input_queue.get_pending_input(&self.active_turn).await
 +            }
-+            TaskStartOwnership::IdleReservation(_) => Vec::new(),
++            TaskStartOwnership::IdleReservation(_) => {
++                (Vec::new(), codex_protocol::turn_input::TurnStartOptions::default())
++            }
 +            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
 +                let accepts_mailbox_delivery = expected_turn_state
 +                    .lock()
 +                    .await
 +                    .accepts_mailbox_delivery_for_current_turn();
 +                if !accepts_mailbox_delivery {
-+                    Vec::new()
++                    (Vec::new(), codex_protocol::turn_input::TurnStartOptions::default())
 +                } else {
 +                    let mut pending_items = self
 +                        .input_queue
 +                        .take_pending_input_for_turn_state(expected_turn_state.as_ref())
 +                        .await;
-+                    pending_items.extend(self.input_queue.drain_mailbox_input_items().await);
-+                    pending_items
++                    let (mailbox_items, start_options) =
++                        self.input_queue.drain_mailbox_input_items().await;
++                    pending_items.extend(mailbox_items);
++                    (pending_items, start_options)
 +                }
 +            }
-         };
++        };
 +        let mut active = match pending_work_active_turn {
 +            Some(active) => active,
 +            None => self.active_turn.lock().await,
 +        };
++        let mut automatic_turn_admission = None;
 +        let turn = match &ownership {
 +            TaskStartOwnership::Available => active.get_or_insert_with(ActiveTurn::default),
 +            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
@@ -3373,19 +4069,44 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc
 +                let Some(turn) = active.as_mut() else {
 +                    return false;
 +                };
-+                if self
-+                    .client_input_reservations
-+                    .load(std::sync::atomic::Ordering::Acquire)
-+                    != 0
++                if self.has_client_input_reservations()
 +                    || !turn.idle_reservation
 +                    || turn.task.is_some()
 +                    || !Arc::ptr_eq(&turn.turn_state, expected_turn_state)
 +                {
 +                    return false;
 +                }
++                #[cfg(test)]
++                self.wait_at_automatic_turn_admission_test_gate().await;
++                let Some(admission) = self.try_claim_automatic_turn_admission() else {
++                    return false;
++                };
++                automatic_turn_admission = Some(admission);
 +                turn
 +            }
 +        };
+         let started_at = Instant::now();
+         let turn_started_at_unix_ms = turn_context
+             .turn_timing_state
+@@ -306,8 +525,6 @@ impl Session {
+             .lock()
+             .await
+             .clear_turn(&turn_context.sub_id);
+-
+-        let (pending_items, start_options) = self.input_queue.drain_mailbox_input_items().await;
+         if turn_context.turn_metadata_state.root_turn_id().is_none()
+             && let Some(root_turn_id) = start_options.root_turn_id
+         {
+@@ -315,12 +532,13 @@ impl Session {
+                 .turn_metadata_state
+                 .set_root_turn_id(root_turn_id);
+         }
+-        let turn_state = {
+-            let mut active = self.active_turn.lock().await;
+-            let turn = active.get_or_insert_with(ActiveTurn::default);
+-            debug_assert!(turn.task.is_none());
+-            Arc::clone(&turn.turn_state)
+-        };
 +        assert!(turn.task.is_none(), "cannot overwrite an installed task");
 +        assert!(
 +            !matches!(&ownership, TaskStartOwnership::Available) || !turn.idle_reservation,
@@ -3396,44 +4117,41 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc
          turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
          self.input_queue
              .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
-@@ -365,9 +526,6 @@ impl Session {
+@@ -328,9 +546,6 @@ impl Session {
+         self.emit_turn_start_lifecycle(turn_context.as_ref(), &token_usage_at_turn_start)
              .await;
  
-         let turn_extension_data = Arc::clone(&turn_context.extension_data);
 -        let mut active = self.active_turn.lock().await;
 -        let turn = active.get_or_insert_with(ActiveTurn::default);
 -        debug_assert!(turn.task.is_none());
          let agent_execution_guard = self.services.agent_control.execution_guard(
              turn_context.multi_agent_version,
              &turn_context.session_source,
-@@ -449,6 +607,7 @@ impl Session {
+@@ -409,6 +624,8 @@ impl Session {
              _timer: timer,
          };
          turn.task = Some(running_task);
++        drop(automatic_turn_admission);
 +        true
      }
  
-     /// Starts a regular turn when the session is idle and pending work is waiting.
-@@ -479,18 +638,29 @@ impl Session {
-             return;
-         }
- 
--        {
-+        let turn_state = {
-             let mut active_turn = self.active_turn.lock().await;
+     /// Returns whether an extension has marked this thread as durably asleep.
+@@ -456,8 +673,10 @@ impl Session {
              if active_turn.is_some() {
                  return;
              }
--            *active_turn = Some(ActiveTurn::default());
--        }
+-            let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
+-            Arc::clone(&active_turn.turn_state)
 +            let reservation = ActiveTurn::default();
 +            let turn_state = Arc::clone(&reservation.turn_state);
 +            *active_turn = Some(reservation);
 +            turn_state
-+        };
+         };
  
-         let turn_context = self.new_default_turn_with_sub_id(sub_id).await;
-         self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
+         let (input, mut start_options) =
+@@ -504,7 +723,15 @@ impl Session {
+         self.input_queue
+             .extend_pending_input_for_turn_state(turn_state.as_ref(), input)
              .await;
 -        self.start_task(turn_context, Vec::new(), RegularTask::new())
 +        #[cfg(test)]
@@ -3448,7 +4166,7 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc
              .await;
      }
  
-@@ -511,7 +681,7 @@ impl Session {
+@@ -526,7 +753,7 @@ impl Session {
          }
  
          if let Some(turn_context) = turn_context.as_deref() {
@@ -3457,8 +4175,8 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc
                  .await;
          }
          if let Some(active_turn) = active_turn_to_clear {
-@@ -551,7 +721,7 @@ impl Session {
-             self.handle_task_abort(task, reason.clone()).await;
+@@ -573,7 +800,7 @@ impl Session {
+                 .await;
          }
          if let Some(turn_context) = turn_context.as_deref() {
 -            self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
@@ -3466,16 +4184,16 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc
                  .await;
          }
          // Let interrupted tasks observe cancellation before dropping pending approvals, or an
-@@ -769,7 +939,7 @@ impl Session {
-                 profile: turn_context.turn_timing_state.complete_profile(),
-             });
-         let event = if let Some(reason) = abort_reason {
+@@ -808,7 +1035,7 @@ impl Session {
+             if reason == TurnAbortReason::Interrupted {
+                 run_turn_interrupt_hooks(self, &turn_context, &turn_state).await;
+             }
 -            self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
 +            self.emit_turn_abort_lifecycle(reason.clone(), turn_context.as_ref())
                  .await;
              EventMsg::TurnAborted(TurnAbortedEvent {
                  turn_id: Some(turn_context.sub_id.clone()),
-@@ -784,8 +954,7 @@ impl Session {
+@@ -823,8 +1050,7 @@ impl Session {
                  .time_to_first_token_ms()
                  .await;
              let error = turn_context.terminal_error.lock().await.clone();
@@ -3486,25 +4204,24 @@ index 9dfa559b7d864a1760e3a657a79b1b946781ddfc..5efa545c366c02f7ff6fe6dae0c80ebc
                  turn_id: turn_context.sub_id.clone(),
                  last_agent_message,
 diff --git a/codex-rs/core/src/tasks/review.rs b/codex-rs/core/src/tasks/review.rs
-index 0e2e2712e0be09a2314b8d63751043b2cd13234a..5eefb31d82bac496d2dccd734fa337e996db99f1 100644
+index 42ec842e70..03b9853c53 100644
 --- a/codex-rs/core/src/tasks/review.rs
 +++ b/codex-rs/core/src/tasks/review.rs
-@@ -67,7 +67,9 @@ impl SessionTask for ReviewTask {
+@@ -67,7 +67,8 @@ impl SessionTask for ReviewTask {
          for item in input {
              match item {
                  TurnInput::UserInput { mut content, .. } => user_input.append(&mut content),
--                TurnInput::ResponseItem(_) | TurnInput::InterAgentCommunication(_) => {}
+-                TurnInput::ResponseItem(_)
 +                TurnInput::DisplayItem(_)
 +                | TurnInput::ResponseItem(_)
-+                | TurnInput::InterAgentCommunication(_) => {}
+                 | TurnInput::FunctionCallOutput(_)
+                 | TurnInput::InterAgentCommunication(_) => {}
              }
-         }
- 
 diff --git a/codex-rs/core/src/thread_manager.rs b/codex-rs/core/src/thread_manager.rs
-index 3a4b876dc39177371e279e81236de40d68b6c936..f5fda86e3758f4d95dd59c654a47c72277485c07 100644
+index cfa619697f..ea18da4bc6 100644
 --- a/codex-rs/core/src/thread_manager.rs
 +++ b/codex-rs/core/src/thread_manager.rs
-@@ -753,14 +753,24 @@ impl ThreadManager {
+@@ -1016,14 +1016,24 @@ impl ThreadManager {
          let inherited_multi_agent_version = fork_source
              .multi_agent_version()
              .unwrap_or(MultiAgentVersion::V1);
@@ -3537,23 +4254,228 @@ index 3a4b876dc39177371e279e81236de40d68b6c936..f5fda86e3758f4d95dd59c654a47c722
          self.start_thread_inner(options, Some(forked_from_thread_id))
              .await
      }
+diff --git a/codex-rs/core/tests/suite/retry_after.rs b/codex-rs/core/tests/suite/retry_after.rs
+index c24d510049..3e4312fd3c 100644
+--- a/codex-rs/core/tests/suite/retry_after.rs
++++ b/codex-rs/core/tests/suite/retry_after.rs
+@@ -293,6 +293,60 @@ async fn responses_http_uses_local_backoff_despite_retry_after() -> Result<()> {
+     Ok(())
+ }
+ 
++/// Ordinary HTTP 429 responses use the same bounded request backoff as transient 5xx errors.
++#[tokio::test(flavor = "current_thread")]
++async fn responses_http_429_retries_with_local_backoff() -> Result<()> {
++    skip_if_no_network!(Ok(()));
++
++    let mut telemetry = RetryTelemetryCapture::install();
++    let server = responses::start_mock_server().await;
++    let response_mock = responses::mount_response_sequence(
++        &server,
++        vec![
++            ResponseTemplate::new(429).set_body_json(json!({
++                "error": {
++                    "type": "rate_limit_exceeded",
++                    "message": "temporary rate limit",
++                }
++            })),
++            responses::sse_response(responses::sse(vec![
++                responses::ev_response_created("recovered"),
++                responses::ev_completed("recovered"),
++            ])),
++        ],
++    )
++    .await;
++    let test = test_codex()
++        .with_config(|config| {
++            config.model_provider.request_max_retries = Some(1);
++            config.model_provider.stream_max_retries = Some(0);
++        })
++        .build_with_auto_env(&server)
++        .await?;
++
++    submit_user_input(&test, "retry the temporary rate limit").await?;
++    let retry = telemetry.next_retry().await;
++    assert!((FIRST_RETRY_MIN_DELAY..FIRST_RETRY_MAX_DELAY).contains(&retry.delay));
++    assert_eq!(
++        retry,
++        RetryTelemetryEvent {
++            attempt: 1,
++            delay: retry.delay,
++            layer: "http".into(),
++            operation: "request".into(),
++        }
++    );
++    wait_for_retry(&mut telemetry, &retry).await;
++    wait_for_turn_completion(&test).await;
++
++    assert_eq!(response_mock.requests().len(), 2);
++    assert_eq!(
++        telemetry.events.try_recv(),
++        Err(mpsc::error::TryRecvError::Empty)
++    );
++    Ok(())
++}
++
+ /// Check backoff without a live server or tracing events coordinating the retry loop.
+ #[tokio::test(start_paused = true)]
+ async fn http_retry_backoff_exhausts_attempts() {
+@@ -416,6 +470,139 @@ async fn responses_http_overload_without_retry_after_exhausts_request_retries()
+     Ok(())
+ }
+ 
++/// Ordinary HTTP 429 responses exhaust the bounded request budget before one terminal error.
++#[tokio::test(flavor = "current_thread")]
++async fn responses_http_429_exhausts_request_retries() -> Result<()> {
++    skip_if_no_network!(Ok(()));
++
++    let server = responses::start_mock_server().await;
++    Mock::given(method("POST"))
++        .and(path("/v1/responses"))
++        .respond_with(ResponseTemplate::new(429).set_body_json(json!({
++            "error": {
++                "type": "rate_limit_exceeded",
++                "message": "temporary rate limit",
++            }
++        })))
++        .mount(&server)
++        .await;
++    let test = test_codex()
++        .with_config(|config| {
++            config.model_provider.request_max_retries = Some(2);
++            config.model_provider.stream_max_retries = Some(0);
++        })
++        .build_with_auto_env(&server)
++        .await?;
++
++    submit_user_input(&test, "exhaust the temporary rate limit").await?;
++    let mut error_events = 0;
++    let mut stream_error_events = 0;
++    tokio::time::timeout(Duration::from_secs(10), async {
++        loop {
++            match wait_for_event(&test.codex, |_| true).await {
++                EventMsg::Error(error) => {
++                    error_events += 1;
++                    assert_eq!(
++                        error.codex_error_info,
++                        Some(CodexErrorInfo::ResponseTooManyFailedAttempts {
++                            http_status_code: Some(429),
++                        })
++                    );
++                }
++                EventMsg::StreamError(_) => stream_error_events += 1,
++                EventMsg::TurnComplete(event) => {
++                    assert_eq!(
++                        event.error.and_then(|error| error.codex_error_info),
++                        Some(CodexErrorInfo::ResponseTooManyFailedAttempts {
++                            http_status_code: Some(429),
++                        })
++                    );
++                    break;
++                }
++                _ => {}
++            }
++        }
++    })
++    .await
++    .expect("HTTP 429 retries should finish the turn within 10 seconds");
++
++    assert_eq!(error_events, 1);
++    assert_eq!(stream_error_events, 0);
++    let request_count = server
++        .received_requests()
++        .await
++        .expect("mock server should record requests")
++        .into_iter()
++        .filter(|request| request.url.path() == "/v1/responses")
++        .count();
++    assert_eq!(request_count, 3);
++    Ok(())
++}
++
++/// Retrying 429 does not collapse the final usage-limit response into a generic retry error.
++#[tokio::test(flavor = "current_thread")]
++async fn responses_http_usage_limit_remains_distinct_after_request_retries() -> Result<()> {
++    skip_if_no_network!(Ok(()));
++
++    let server = responses::start_mock_server().await;
++    Mock::given(method("POST"))
++        .and(path("/v1/responses"))
++        .respond_with(ResponseTemplate::new(429).set_body_json(json!({
++            "error": {
++                "type": "usage_limit_reached",
++                "message": "usage limit reached",
++                "resets_at": 1704067242,
++                "plan_type": "pro",
++            }
++        })))
++        .mount(&server)
++        .await;
++    let test = test_codex()
++        .with_config(|config| {
++            config.model_provider.request_max_retries = Some(2);
++            config.model_provider.stream_max_retries = Some(0);
++        })
++        .build_with_auto_env(&server)
++        .await?;
++
++    submit_user_input(&test, "preserve the usage-limit classification").await?;
++    let mut error_events = 0;
++    tokio::time::timeout(Duration::from_secs(10), async {
++        loop {
++            match wait_for_event(&test.codex, |_| true).await {
++                EventMsg::Error(error) => {
++                    error_events += 1;
++                    assert_eq!(
++                        error.codex_error_info,
++                        Some(CodexErrorInfo::UsageLimitExceeded)
++                    );
++                }
++                EventMsg::TurnComplete(event) => {
++                    assert_eq!(
++                        event.error.and_then(|error| error.codex_error_info),
++                        Some(CodexErrorInfo::UsageLimitExceeded)
++                    );
++                    break;
++                }
++                _ => {}
++            }
++        }
++    })
++    .await
++    .expect("usage-limit retries should finish the turn within 10 seconds");
++
++    assert_eq!(error_events, 1);
++    let request_count = server
++        .received_requests()
++        .await
++        .expect("mock server should record requests")
++        .into_iter()
++        .filter(|request| request.url.path() == "/v1/responses")
++        .count();
++    assert_eq!(request_count, 3);
++    Ok(())
++}
++
+ // TODO(anp) respect Retry-After
+ /// Remote compaction v2 currently retries with local backoff instead of the upstream header delay.
+ #[tokio::test(flavor = "current_thread")]
 diff --git a/codex-rs/ext/extension-api/src/contributors.rs b/codex-rs/ext/extension-api/src/contributors.rs
-index a58605e952ab159a78b3be42c17b3ecee31e3813..4bdf3d02a2aea248c73bf24e48d0101a38df8c90 100644
+index ebb180755e..d17647e310 100644
 --- a/codex-rs/ext/extension-api/src/contributors.rs
 +++ b/codex-rs/ext/extension-api/src/contributors.rs
-@@ -28,6 +28,7 @@ pub use prompt::PromptFragment;
- pub use prompt::PromptSlot;
+@@ -37,6 +37,7 @@ pub use prompt::PromptSlot;
  pub use skill_invocation::SkillInvocationInput;
  pub use skill_invocation::SkillInvocationKind;
+ pub use thread_lifecycle::ThreadIdleCause;
 +pub use thread_lifecycle::AutomaticTurnOrigin;
  pub use thread_lifecycle::ThreadIdleInput;
  pub use thread_lifecycle::ThreadOriginator;
- pub use thread_lifecycle::ThreadResumeInput;
+ pub use thread_lifecycle::ThreadReadyInput;
 diff --git a/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs b/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs
-index 4fa6e6721c4f96934537df16883c348fd61dcc18..cd9180ffdbe4f57a8a2dc253b7c801a3afe8cafb 100644
+index 38b303a6c9..705945a91f 100644
 --- a/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs
 +++ b/codex-rs/ext/extension-api/src/contributors/thread_lifecycle.rs
-@@ -4,6 +4,7 @@ use crate::ExtensionData;
+@@ -5,6 +5,7 @@ use crate::ExtensionMetrics;
  use codex_mcp::McpResourceClient;
  use codex_protocol::protocol::SessionSource;
  use codex_protocol::protocol::TurnEnvironmentSelection;
@@ -3561,14 +4483,15 @@ index 4fa6e6721c4f96934537df16883c348fd61dcc18..cd9180ffdbe4f57a8a2dc253b7c801a3
  
  /// Trusted, host-resolved billing attribution for a thread.
  ///
-@@ -39,8 +40,31 @@ pub struct ThreadResumeInput<'a> {
-     pub thread_store: &'a ExtensionData,
+@@ -65,10 +66,34 @@ pub enum ThreadIdleCause {
+     Failed,
  }
  
 +/// Trusted origin metadata for a host-started automatic turn.
-+#[derive(Clone, Debug, Eq, PartialEq)]
++#[derive(Clone, Debug, Default, Eq, PartialEq)]
 +pub enum AutomaticTurnOrigin {
 +    /// A turn without an extension-specific origin.
++    #[default]
 +    Unspecified,
 +    /// A turn started by the named extension.
 +    Extension(String),
@@ -3582,6 +4505,8 @@ index 4fa6e6721c4f96934537df16883c348fd61dcc18..cd9180ffdbe4f57a8a2dc253b7c801a3
 +
  /// Input supplied when the host has no immediately pending thread work.
  pub struct ThreadIdleInput<'a> {
+     /// Why the thread became idle.
+     pub cause: ThreadIdleCause,
 +    /// The main turn whose completion produced this idle edge.
 +    pub completed_turn_id: Option<&'a str>,
 +    /// Trusted origin of the completed turn, when it was host-started automatically.
@@ -3594,41 +4519,41 @@ index 4fa6e6721c4f96934537df16883c348fd61dcc18..cd9180ffdbe4f57a8a2dc253b7c801a3
      pub session_store: &'a ExtensionData,
      /// Store scoped to this thread runtime.
 diff --git a/codex-rs/ext/extension-api/src/lib.rs b/codex-rs/ext/extension-api/src/lib.rs
-index 0c7ddce86df25cc312e6fdaa5ea5d4bc51e4c0c0..c33eed4e58fcb2617ba9804d5686b5f3d06ac378 100644
+index a8ba8f1f20..3e58a0f522 100644
 --- a/codex-rs/ext/extension-api/src/lib.rs
 +++ b/codex-rs/ext/extension-api/src/lib.rs
-@@ -32,6 +32,7 @@ pub use codex_tools::TurnItemEmitter;
- pub use codex_tools::parse_tool_input_schema;
- pub use codex_tools::parse_tool_input_schema_without_compaction;
+@@ -44,6 +44,7 @@ pub use contributors::ApprovalAssessment;
  pub use contributors::ApprovalReviewContributor;
+ pub use contributors::ApprovalReviewError;
+ pub use contributors::ApprovalReviewInput;
 +pub use contributors::AutomaticTurnOrigin;
  pub use contributors::ConfigContributor;
  pub use contributors::ContextContributor;
  pub use contributors::ExtensionFuture;
 diff --git a/codex-rs/ext/goal/src/runtime.rs b/codex-rs/ext/goal/src/runtime.rs
-index 31b8b2eb8ed298b1862f3583370ba76c19680e3e..f66cf33147d10ece11e7f30441e5ad33d470fb1b 100644
+index 84fa4204ba..7d716c8048 100644
 --- a/codex-rs/ext/goal/src/runtime.rs
 +++ b/codex-rs/ext/goal/src/runtime.rs
-@@ -32,7 +32,6 @@ pub(crate) struct GoalRuntimeConfig {
+@@ -37,7 +37,6 @@ pub(crate) struct GoalRuntimeConfig {
  }
  
  pub(crate) enum ActiveGoalStopReason {
 -    TurnError,
      UsageLimit,
+     ExecutionUnavailable { expected_goal_id: String },
  }
- 
-@@ -262,9 +261,6 @@ impl GoalRuntimeHandle {
+@@ -289,9 +288,6 @@ impl GoalRuntimeHandle {
          }
  
-         let (event_name, status) = match reason {
+         let (event_name, status, expected_goal_id) = match reason {
 -            ActiveGoalStopReason::TurnError => {
--                ("turn-error", codex_state::ThreadGoalStatus::Blocked)
+-                ("turn-error", codex_state::ThreadGoalStatus::Blocked, None)
 -            }
-             ActiveGoalStopReason::UsageLimit => {
-                 ("usage-limit", codex_state::ThreadGoalStatus::UsageLimited)
-             }
+             ActiveGoalStopReason::UsageLimit => (
+                 "usage-limit",
+                 codex_state::ThreadGoalStatus::UsageLimited,
 diff --git a/codex-rs/ext/items/src/lib.rs b/codex-rs/ext/items/src/lib.rs
-index e1725f7c53fd32d3cdf813b20eb0a3b49e9da6f2..da50c7ab5a80c349c14b5134a5ec3c3dad1bbd29 100644
+index e1725f7c53..da50c7ab5a 100644
 --- a/codex-rs/ext/items/src/lib.rs
 +++ b/codex-rs/ext/items/src/lib.rs
 @@ -9,6 +9,7 @@ use serde::Serialize;
@@ -3659,7 +4584,7 @@ index e1725f7c53fd32d3cdf813b20eb0a3b49e9da6f2..da50c7ab5a80c349c14b5134a5ec3c3d
  }
 diff --git a/codex-rs/ext/items/src/shadow.rs b/codex-rs/ext/items/src/shadow.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..61cf21e2840a98eee2ad8ceab86b7993d6dac9dc
+index 0000000000..61cf21e284
 --- /dev/null
 +++ b/codex-rs/ext/items/src/shadow.rs
 @@ -0,0 +1,15 @@
@@ -3679,10 +4604,10 @@ index 0000000000000000000000000000000000000000..61cf21e2840a98eee2ad8ceab86b7993
 +    pub content: String,
 +}
 diff --git a/codex-rs/ext/items/src/tests.rs b/codex-rs/ext/items/src/tests.rs
-index 036d4254e2559d68d30ea889bd89de5c397edc10..159a4f3b84c888338b93cd30b1348b2addee17d4 100644
+index 1ecc621e49..3ed75786a6 100644
 --- a/codex-rs/ext/items/src/tests.rs
 +++ b/codex-rs/ext/items/src/tests.rs
-@@ -3,6 +3,7 @@ use serde_json::json;
+@@ -4,6 +4,7 @@ use ts_rs::TS;
  
  use super::ExtensionItem;
  use super::image_generation::ImageGenerationItem;
@@ -3690,7 +4615,7 @@ index 036d4254e2559d68d30ea889bd89de5c397edc10..159a4f3b84c888338b93cd30b1348b2a
  use super::sleep::SleepItem;
  use super::web_search::WebSearchAction;
  use super::web_search::WebSearchItem;
-@@ -107,6 +108,32 @@ fn sleep_item_preserves_stable_wire_shape() {
+@@ -178,6 +179,32 @@ fn sleep_item_preserves_stable_wire_shape() {
      );
  }
  
@@ -3725,7 +4650,7 @@ index 036d4254e2559d68d30ea889bd89de5c397edc10..159a4f3b84c888338b93cd30b1348b2a
      let value = json!({
 diff --git a/codex-rs/ext/shadow/BUILD.bazel b/codex-rs/ext/shadow/BUILD.bazel
 new file mode 100644
-index 0000000000000000000000000000000000000000..7232a55ee3cf4205ed2bd6a1e91cdedd2e1bfd80
+index 0000000000..7232a55ee3
 --- /dev/null
 +++ b/codex-rs/ext/shadow/BUILD.bazel
 @@ -0,0 +1,6 @@
@@ -3737,7 +4662,7 @@ index 0000000000000000000000000000000000000000..7232a55ee3cf4205ed2bd6a1e91cdedd
 +)
 diff --git a/codex-rs/ext/shadow/Cargo.toml b/codex-rs/ext/shadow/Cargo.toml
 new file mode 100644
-index 0000000000000000000000000000000000000000..cbaaf99d46a4cb634ad36f8fbaaa5c1d38f37985
+index 0000000000..cbaaf99d46
 --- /dev/null
 +++ b/codex-rs/ext/shadow/Cargo.toml
 @@ -0,0 +1,29 @@
@@ -3772,7 +4697,7 @@ index 0000000000000000000000000000000000000000..cbaaf99d46a4cb634ad36f8fbaaa5c1d
 +tempfile = { workspace = true }
 diff --git a/codex-rs/ext/shadow/src/lib.rs b/codex-rs/ext/shadow/src/lib.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..b3a81a191cea2b1a97aa0735d52355baf07ce7e0
+index 0000000000..b3a81a191c
 --- /dev/null
 +++ b/codex-rs/ext/shadow/src/lib.rs
 @@ -0,0 +1,1414 @@
@@ -5191,19 +6116,19 @@ index 0000000000000000000000000000000000000000..b3a81a191cea2b1a97aa0735d52355ba
 +    }
 +}
 diff --git a/codex-rs/features/src/lib.rs b/codex-rs/features/src/lib.rs
-index d291dbeffa4c92fa01753a1f1ebad6f36b2d3469..4ce1a7c58a5aca185f8ec81dcb0280e81c833a86 100644
+index fdeae5c6f5..4b9c159e1f 100644
 --- a/codex-rs/features/src/lib.rs
 +++ b/codex-rs/features/src/lib.rs
-@@ -226,6 +226,8 @@ pub enum Feature {
-     GuardianApproval,
+@@ -311,6 +311,8 @@ pub enum Feature {
+     GuardianExt,
      /// Enable persisted thread goals and automatic goal continuation.
      Goals,
 +    /// Enable registry-backed shadow mind scheduling.
 +    Shadow,
      /// Add current context-window metadata to model-visible context.
      TokenBudget,
-     /// Track and report a shared token budget across a session's agent threads.
-@@ -1269,6 +1271,12 @@ pub const FEATURES: &[FeatureSpec] = &[
+     /// Enables experimental context management.
+@@ -1547,6 +1549,12 @@ pub const FEATURES: &[FeatureSpec] = &[
          stage: Stage::Stable,
          default_enabled: true,
      },
@@ -5216,8 +6141,21 @@ index d291dbeffa4c92fa01753a1f1ebad6f36b2d3469..4ce1a7c58a5aca185f8ec81dcb0280e8
      FeatureSpec {
          id: Feature::TokenBudget,
          key: "token_budget",
+diff --git a/codex-rs/model-provider-info/src/lib.rs b/codex-rs/model-provider-info/src/lib.rs
+index 3fb3e87a2a..b9692ea281 100644
+--- a/codex-rs/model-provider-info/src/lib.rs
++++ b/codex-rs/model-provider-info/src/lib.rs
+@@ -314,7 +314,7 @@ impl ModelProviderInfo {
+         let retry = ApiRetryConfig {
+             max_attempts: self.request_max_retries(),
+             base_delay: Duration::from_millis(200),
+-            retry_429: false,
++            retry_429: true,
+             retry_5xx: true,
+             retry_transport: true,
+         };
 diff --git a/codex-rs/rollout/src/persistence_metrics_tests.rs b/codex-rs/rollout/src/persistence_metrics_tests.rs
-index 3a352263b7bea426cb1da38190de706942aeacb5..db36f43c40850769cbc71ff893e18226af1dd44a 100644
+index fed1b112e8..513a365a3a 100644
 --- a/codex-rs/rollout/src/persistence_metrics_tests.rs
 +++ b/codex-rs/rollout/src/persistence_metrics_tests.rs
 @@ -1,3 +1,5 @@
@@ -5226,7 +6164,7 @@ index 3a352263b7bea426cb1da38190de706942aeacb5..db36f43c40850769cbc71ff893e18226
  use codex_protocol::ThreadId;
  use codex_protocol::items::EnteredReviewModeItem;
  use codex_protocol::items::ExitedReviewModeItem;
-@@ -345,3 +347,28 @@ fn review_mode_persistence_depends_on_history_mode() {
+@@ -349,3 +351,28 @@ fn review_mode_persistence_depends_on_history_mode() {
          serde_json::to_value(completed_items).expect("serialize expected items")
      );
  }
@@ -5256,25 +6194,22 @@ index 3a352263b7bea426cb1da38190de706942aeacb5..db36f43c40850769cbc71ff893e18226
 +    }
 +}
 diff --git a/codex-rs/rollout/src/policy.rs b/codex-rs/rollout/src/policy.rs
-index 65a8213f08fde9804d46cc78ea5d2214e344b6ed..8666776cb36b18da747491b863108d599daf3067 100644
+index cc54ac5554..84b63f8893 100644
 --- a/codex-rs/rollout/src/policy.rs
 +++ b/codex-rs/rollout/src/policy.rs
-@@ -92,7 +92,9 @@ pub fn should_persist_event_msg(ev: &EventMsg, history_mode: ThreadHistoryMode)
-             matches!(history_mode, ThreadHistoryMode::Paginated)
-                 || matches!(
-                     event.item,
--                    TurnItem::Plan(_) | TurnItem::Extension(ExtensionItem::Sleep(_))
-+                    TurnItem::Plan(_)
-+                        | TurnItem::Extension(ExtensionItem::Sleep(_))
+@@ -100,6 +100,7 @@ pub fn should_persist_event_msg(ev: &EventMsg, history_mode: ThreadHistoryMode)
+                     TurnItem::FunctionCallOutput(_)
+                         | TurnItem::Plan(_)
+                         | TurnItem::Extension(ExtensionItem::Sleep(_))
 +                        | TurnItem::Extension(ExtensionItem::ShadowReport(_))
                  )
-         }
-         EventMsg::TokenCount(_)
+                 || matches!(
+                     &event.item,
 diff --git a/codex-rs/thread-store/src/local/thread_history.rs b/codex-rs/thread-store/src/local/thread_history.rs
-index 616c627969b468dd1f0f1d30f17654d3bd1a0933..4f5af3489cf374e7bf3b4da465a413a99cb7eb52 100644
+index 7b31841842..81ee56e560 100644
 --- a/codex-rs/thread-store/src/local/thread_history.rs
 +++ b/codex-rs/thread-store/src/local/thread_history.rs
-@@ -402,7 +402,8 @@ WHERE thread_id = ?
+@@ -533,7 +533,8 @@ WHERE thread_id = ?
              | ThreadItem::ImageGeneration(_)
              | ThreadItem::EnteredReviewMode { .. }
              | ThreadItem::ExitedReviewMode { .. }
@@ -5285,10 +6220,10 @@ index 616c627969b468dd1f0f1d30f17654d3bd1a0933..4f5af3489cf374e7bf3b4da465a413a9
      }
      Ok(())
 diff --git a/codex-rs/thread-store/src/local/thread_history/search.rs b/codex-rs/thread-store/src/local/thread_history/search.rs
-index 46e61dd192f545824527fb3282a68d4f217dc199..13f14780ba932ff7c600b33a2987ab99ca33ab64 100644
+index f93fe61eb3..78d8185aaf 100644
 --- a/codex-rs/thread-store/src/local/thread_history/search.rs
 +++ b/codex-rs/thread-store/src/local/thread_history/search.rs
-@@ -276,6 +276,7 @@ fn searchable_text(item: &ThreadItem) -> Option<Cow<'_, str>> {
+@@ -348,6 +348,7 @@ fn searchable_text(item: &ThreadItem) -> Option<Cow<'_, str>> {
          | ThreadItem::EnteredReviewMode { .. }
          | ThreadItem::ExitedReviewMode { .. }
          | ThreadItem::ContextCompaction { .. } => None,
@@ -5297,10 +6232,10 @@ index 46e61dd192f545824527fb3282a68d4f217dc199..13f14780ba932ff7c600b33a2987ab99
  }
  
 diff --git a/codex-rs/tui/Cargo.toml b/codex-rs/tui/Cargo.toml
-index 7fd75990ebc2702e991c1edd997b577832f5f504..dc746f81b7ddcc3c89371fb35d3fa4affea6ba78 100644
+index 7de0ba58a0..c95e36e040 100644
 --- a/codex-rs/tui/Cargo.toml
 +++ b/codex-rs/tui/Cargo.toml
-@@ -49,6 +49,7 @@ codex-otel = { workspace = true }
+@@ -52,6 +52,7 @@ codex-otel = { workspace = true }
  codex-plugin = { workspace = true }
  codex-protocol = { workspace = true }
  codex-rollout = { workspace = true }
@@ -5309,38 +6244,38 @@ index 7fd75990ebc2702e991c1edd997b577832f5f504..dc746f81b7ddcc3c89371fb35d3fa4af
  codex-shell-command = { workspace = true }
  codex-state = { workspace = true }
 diff --git a/codex-rs/tui/src/app/agent_status_feed.rs b/codex-rs/tui/src/app/agent_status_feed.rs
-index efaa6c5ad809941df74757c54c7f3e3c1e76988c..2c924551b4f526224a15c2b2d3828b6d346ca709 100644
+index 1039b043ee..ef2a673496 100644
 --- a/codex-rs/tui/src/app/agent_status_feed.rs
 +++ b/codex-rs/tui/src/app/agent_status_feed.rs
-@@ -189,6 +189,9 @@ fn activity_summary(item: &ThreadItem) -> Option<String> {
+@@ -192,6 +192,9 @@ fn activity_summary(item: &ThreadItem) -> Option<String> {
          ThreadItem::EnteredReviewMode { .. } => return Some("Entered review mode".to_string()),
          ThreadItem::ExitedReviewMode { .. } => return Some("Exited review mode".to_string()),
          ThreadItem::ContextCompaction { .. } => return Some("Compacted context".to_string()),
 +        ThreadItem::ShadowReport(item) => {
 +            return bounded_summary(&format!("Shadow: {}", item.shadow_name));
 +        }
-         ThreadItem::UserMessage { .. } | ThreadItem::HookPrompt { .. } | ThreadItem::Sleep(_) => {
-             return None;
-         }
+         ThreadItem::UserMessage { .. }
+         | ThreadItem::HookPrompt { .. }
+         | ThreadItem::FunctionCallOutput { .. }
 diff --git a/codex-rs/tui/src/bottom_pane/slash_commands.rs b/codex-rs/tui/src/bottom_pane/slash_commands.rs
-index 6ca1ba93d137e3ca4c47f02dfe7105f678a028d1..656fe63c0c0a189dee3e635a689a59abb6c9f1cd 100644
+index 52b980e93f..0f29a2c28a 100644
 --- a/codex-rs/tui/src/bottom_pane/slash_commands.rs
 +++ b/codex-rs/tui/src/bottom_pane/slash_commands.rs
-@@ -308,6 +308,7 @@ mod tests {
-                 SlashCommand::Diff,
+@@ -311,6 +311,7 @@ mod tests {
                  SlashCommand::Mention,
                  SlashCommand::Status,
+                 SlashCommand::Pwd,
 +                SlashCommand::Shadow,
                  SlashCommand::Usage,
              ]
          );
 diff --git a/codex-rs/tui/src/chatwidget/replay.rs b/codex-rs/tui/src/chatwidget/replay.rs
-index fad6eb8473e260bba34a851f9d9c7629709694d1..c2c0a9e32fe788399c0d0c49bafd0884efcbffff 100644
+index cb2c8d84cd..0454c08362 100644
 --- a/codex-rs/tui/src/chatwidget/replay.rs
 +++ b/codex-rs/tui/src/chatwidget/replay.rs
-@@ -189,6 +189,12 @@ impl ChatWidget {
-             ThreadItem::ContextCompaction { .. } => {
-                 self.add_info_message("Context compacted".to_string(), /*hint*/ None);
+@@ -221,6 +221,12 @@ impl ChatWidget {
+                     ));
+                 }
              }
 +            ThreadItem::ShadowReport(item) => {
 +                self.add_to_history(history_cell::new_shadow_report(
@@ -5352,7 +6287,7 @@ index fad6eb8473e260bba34a851f9d9c7629709694d1..c2c0a9e32fe788399c0d0c49bafd0884
              ThreadItem::CollabAgentToolCall {
                  id,
 diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
-index e28cfd7043c98dd779394af82b3692bc89118ae6..420d43975792242f477c6ba7f0bce0f4873f28e3 100644
+index 7f2028f333..3d672ebe93 100644
 --- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 +++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 @@ -14,6 +14,7 @@ use crate::bottom_pane::slash_commands::SlashCommandItem;
@@ -5363,31 +6298,31 @@ index e28cfd7043c98dd779394af82b3692bc89118ae6..420d43975792242f477c6ba7f0bce0f4
  
  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
  enum SlashCommandDispatchSource {
-@@ -447,6 +448,7 @@ impl ChatWidget {
-                     );
-                 }
+@@ -483,6 +484,7 @@ impl ChatWidget {
+                     /*hint*/ None,
+                 );
              }
 +            SlashCommand::Shadow => self.handle_shadow_command("status"),
              SlashCommand::Usage => {
                  if self.ensure_usage_command_available() {
                      self.open_usage_menu();
-@@ -671,6 +673,7 @@ impl ChatWidget {
-         } = prepared;
-         let trimmed = args.trim();
-         match cmd {
+@@ -723,6 +725,7 @@ impl ChatWidget {
+             SlashCommand::Pwd => {
+                 self.add_error_message("Usage: /pwd".to_string());
+             }
 +            SlashCommand::Shadow => self.handle_shadow_command(trimmed),
              SlashCommand::Usage => {
                  if self.ensure_usage_command_available() {
                      match tokens::TokenActivityView::parse(trimmed) {
-@@ -1057,6 +1060,7 @@ impl ChatWidget {
-         match cmd {
+@@ -1135,6 +1138,7 @@ impl ChatWidget {
              SlashCommand::Ide
              | SlashCommand::Status
+             | SlashCommand::Pwd
 +            | SlashCommand::Shadow
              | SlashCommand::Usage
              | SlashCommand::DebugConfig
              | SlashCommand::Ps
-@@ -1113,6 +1117,81 @@ impl ChatWidget {
+@@ -1197,6 +1201,81 @@ impl ChatWidget {
          }
      }
  
@@ -5470,10 +6405,10 @@ index e28cfd7043c98dd779394af82b3692bc89118ae6..420d43975792242f477c6ba7f0bce0f4
          rest: &str,
          rest_offset: usize,
 diff --git a/codex-rs/tui/src/chatwidget/tests/slash_commands.rs b/codex-rs/tui/src/chatwidget/tests/slash_commands.rs
-index 47d597db926ee7317e13ec98d267b6a9fc9b7363..6980275e99ba9f52e66089c6a6a08fe347d50cc0 100644
+index de6eb5f405..352400f719 100644
 --- a/codex-rs/tui/src/chatwidget/tests/slash_commands.rs
 +++ b/codex-rs/tui/src/chatwidget/tests/slash_commands.rs
-@@ -839,6 +839,55 @@ async fn goal_control_slash_command_without_thread_shows_full_usage() {
+@@ -877,6 +877,55 @@ async fn goal_control_slash_command_without_thread_shows_full_usage() {
      );
  }
  
@@ -5530,10 +6465,10 @@ index 47d597db926ee7317e13ec98d267b6a9fc9b7363..6980275e99ba9f52e66089c6a6a08fe3
  async fn goal_edit_slash_command_opens_goal_editor() {
      for thread_id in [Some(ThreadId::new()), None] {
 diff --git a/codex-rs/tui/src/history_cell/mod.rs b/codex-rs/tui/src/history_cell/mod.rs
-index d0ce17edc53634b1916fb387939580ba327a79a0..de928aaa357007fec9c5f7c896fb3031abf0834b 100644
+index 4e51d50f7c..cf197b2a3a 100644
 --- a/codex-rs/tui/src/history_cell/mod.rs
 +++ b/codex-rs/tui/src/history_cell/mod.rs
-@@ -123,6 +123,7 @@ mod request_user_input;
+@@ -116,6 +116,7 @@ mod request_user_input;
  mod search;
  mod separators;
  mod session;
@@ -5541,7 +6476,7 @@ index d0ce17edc53634b1916fb387939580ba327a79a0..de928aaa357007fec9c5f7c896fb3031
  
  pub(crate) use approvals::*;
  pub(crate) use base::*;
-@@ -139,6 +140,7 @@ pub(crate) use request_user_input::*;
+@@ -132,6 +133,7 @@ pub(crate) use request_user_input::*;
  pub(crate) use search::*;
  pub(crate) use separators::*;
  pub(crate) use session::*;
@@ -5551,7 +6486,7 @@ index d0ce17edc53634b1916fb387939580ba327a79a0..de928aaa357007fec9c5f7c896fb3031
  mod tests;
 diff --git a/codex-rs/tui/src/history_cell/shadow.rs b/codex-rs/tui/src/history_cell/shadow.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..3a767709870b54e231c8a3a78f1117762406d7f5
+index 0000000000..3a76770987
 --- /dev/null
 +++ b/codex-rs/tui/src/history_cell/shadow.rs
 @@ -0,0 +1,53 @@
@@ -5609,10 +6544,10 @@ index 0000000000000000000000000000000000000000..3a767709870b54e231c8a3a78f111776
 +    }
 +}
 diff --git a/codex-rs/tui/src/history_cell/tests.rs b/codex-rs/tui/src/history_cell/tests.rs
-index 5535b2e70a549b2527eea86bd09d90cb93559a74..bad1efca8a219c9c88f26f7a8e313917da6de4cc 100644
+index ae781fc3a9..ef4b3bb31c 100644
 --- a/codex-rs/tui/src/history_cell/tests.rs
 +++ b/codex-rs/tui/src/history_cell/tests.rs
-@@ -1132,6 +1132,32 @@ fn web_search_history_cell_snapshot() {
+@@ -1211,6 +1211,32 @@ fn web_search_history_cell_snapshot() {
      insta::assert_snapshot!(rendered);
  }
  
@@ -5646,50 +6581,50 @@ index 5535b2e70a549b2527eea86bd09d90cb93559a74..bad1efca8a219c9c88f26f7a8e313917
  fn standalone_unix_update_available_history_cell_snapshot() {
      let cell =
 diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
-index abd1386932e1e6fe355135bfd13537f89753a629..d577e92f843e54de5987fda4cd5029f76d226300 100644
+index aab133ffb7..b9de387b91 100644
 --- a/codex-rs/tui/src/slash_command.rs
 +++ b/codex-rs/tui/src/slash_command.rs
-@@ -48,6 +48,7 @@ pub enum SlashCommand {
-     Diff,
-     Mention,
-     Status,
+@@ -53,6 +53,7 @@ pub enum SlashCommand {
+     Cd,
+     #[strum(to_string = "pwd", serialize = "cwd")]
+     Pwd,
 +    Shadow,
      Usage,
      DebugConfig,
      Title,
-@@ -103,6 +104,7 @@ impl SlashCommand {
-             SlashCommand::Import => "import setup, this project, and recent chats from Claude Code",
-             SlashCommand::Hooks => "view and manage lifecycle hooks",
+@@ -112,6 +113,7 @@ impl SlashCommand {
              SlashCommand::Status => "show current session configuration and token usage",
+             SlashCommand::Cd => "change the current working directory",
+             SlashCommand::Pwd => "show the current working directory",
 +            SlashCommand::Shadow => "manage registry-backed shadow minds",
              SlashCommand::Usage => "view account usage or use a usage limit reset",
              SlashCommand::DebugConfig => "show config layers and requirement sources for debugging",
              SlashCommand::Title => "configure which items appear in the terminal title",
-@@ -163,6 +165,7 @@ impl SlashCommand {
-                 | SlashCommand::Keymap
-                 | SlashCommand::Mcp
+@@ -177,6 +179,7 @@ impl SlashCommand {
                  | SlashCommand::Raw
+                 | SlashCommand::Cd
+                 | SlashCommand::Pwd
 +                | SlashCommand::Shadow
                  | SlashCommand::Usage
                  | SlashCommand::Pets
                  | SlashCommand::Side
-@@ -181,6 +184,7 @@ impl SlashCommand {
-                 | SlashCommand::Diff
+@@ -198,6 +201,7 @@ impl SlashCommand {
                  | SlashCommand::Mention
                  | SlashCommand::Status
+                 | SlashCommand::Pwd
 +                | SlashCommand::Shadow
                  | SlashCommand::Usage
                  | SlashCommand::Ide
          )
-@@ -220,6 +224,7 @@ impl SlashCommand {
-             | SlashCommand::Skills
+@@ -241,6 +245,7 @@ impl SlashCommand {
              | SlashCommand::Hooks
              | SlashCommand::Status
+             | SlashCommand::Pwd
 +            | SlashCommand::Shadow
              | SlashCommand::Usage
              | SlashCommand::DebugConfig
              | SlashCommand::Ps
-@@ -290,6 +295,8 @@ mod tests {
+@@ -311,6 +316,8 @@ mod tests {
      #[test]
      fn certain_commands_are_available_during_task() {
          assert!(SlashCommand::Goal.available_during_task());
@@ -5699,10 +6634,10 @@ index abd1386932e1e6fe355135bfd13537f89753a629..d577e92f843e54de5987fda4cd5029f7
          assert!(SlashCommand::Title.available_during_task());
          assert!(SlashCommand::Statusline.available_during_task());
 diff --git a/codex-rs/tui/src/thread_transcript.rs b/codex-rs/tui/src/thread_transcript.rs
-index c7b7a2bb8a0334637ea9162cdef3212b3de1d393..0379064c0bba58cf8cc36cf3439a04a2905b1c61 100644
+index 2c5f44edf3..f9a2f43377 100644
 --- a/codex-rs/tui/src/thread_transcript.rs
 +++ b/codex-rs/tui/src/thread_transcript.rs
-@@ -250,6 +250,19 @@ fn fallback_transcript_cell(item: &ThreadItem) -> Option<PlainHistoryCell> {
+@@ -300,6 +300,19 @@ fn fallback_transcript_cell(item: &ThreadItem) -> Option<PlainHistoryCell> {
          ThreadItem::ContextCompaction { .. } => {
              vec!["context compacted".dim().into()]
          }
@@ -5721,4 +6656,4 @@ index c7b7a2bb8a0334637ea9162cdef3212b3de1d393..0379064c0bba58cf8cc36cf3439a04a2
 +        .collect(),
          ThreadItem::UserMessage { .. }
          | ThreadItem::AgentMessage { .. }
-         | ThreadItem::Plan { .. }
+         | ThreadItem::FunctionCallOutput { .. }

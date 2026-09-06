@@ -11,37 +11,42 @@
     ".vscode/settings.json": {
       "rebuilt": "e76b84ceeab82a7b4696c334da288058dabb9f0f875615a260455c8c2f521ab1",
       "source": null
-    },
-    "codex-rs/Cargo.lock": {
-      "rebuilt": "9bf96fc5e5c6837cde169038636b1d2140b3247ed9c516dbafdae465924bf97a",
-      "source": "c774cac88602eb494323b1177edcbbc44d248013ea2effbc9680fcc1cfb7c7db"
-    },
-    "codex-rs/vendor/bubblewrap/LICENSE": {
-      "rebuilt": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c",
-      "source": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
     }
   },
-  "commit": "bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb",
+  "commit": "3d2ee51ca2d5db578f328aa75e20aa22c0197c9a",
   "expected_materialization_differences": [
     ".vscode/extensions.json",
     ".vscode/launch.json",
-    ".vscode/settings.json",
-    "codex-rs/Cargo.lock",
-    "codex-rs/vendor/bubblewrap/LICENSE"
+    ".vscode/settings.json"
   ],
   "normalized_git_symlinks": {
     "codex-rs/vendor/bubblewrap/LICENSE": "COPYING"
   },
-  "note": "Content differences are reported explicitly; rebuilt Git symlinks are hashed through their targets across checkout modes, while copied source bytes remain literal materialization evidence.",
+  "note": "Content differences are reported explicitly; rebuilt Git symlinks are hashed through their targets across checkout modes, while copied source symlinks are portable regular files containing the resolved target bytes.",
+  "patch_application": [
+    {
+      "mode": "three-way",
+      "patch": "patches/goal-old-continuation.patch",
+      "preimage_commit": "bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb"
+    },
+    {
+      "mode": "direct",
+      "patch": "patches/shadow-mind.patch"
+    }
+  ],
   "patch_sha256": [
     "eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6",
-    "7c2e2476c5df766d0d114c7bde3f737aa4ee5a2f2216d16d4da79239be461bd9"
+    "08ba93f5cb9c622124d10c0ea7ea039308545a363731bef2c69ca778dff0cc6f"
   ],
   "patches": [
     "patches/goal-old-continuation.patch",
     "patches/shadow-mind.patch"
   ],
-  "rebuilt_tree_sha256": "32ade360669c741132a34acc42f156114d8318d17a48270c60773d2206a98cf1",
-  "source_tree_sha256": "ed5f153f420dfde260335e45917b316d0f7656772838d55ab48a5cf276436df2",
+  "rebuilt_tree_sha256": "cf015e793f897165d793eac2aff94d384c0ad036645abefcb8c777c675399d68",
+  "source_file_sha256": {
+    "codex-rs/Cargo.lock": "46f14104f7ffa97c66e590970309db3973133c4745d74a3a2f312c3107567756"
+  },
+  "source_tree_sha256": "21637802d30dc44e44158b7a8a8914d4d8ac590d82650f56a0cf3aeedebf5fb9",
+  "tag": "rust-v0.153.4",
   "upstream": "https://github.com/openai/codex.git"
 }

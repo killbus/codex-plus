@@ -4,6 +4,7 @@ use std::sync::Arc;
 use codex_exec_server_protocol::JSONRPCErrorError;
 use codex_network_proxy::CUSTOM_CA_ENV_KEYS;
 use codex_network_proxy::ManagedNetworkSandboxContext;
+use codex_network_proxy::NetworkPolicyAuditObserver;
 use codex_network_proxy::NetworkPolicyDecider;
 use codex_network_proxy::NetworkProxy;
 use codex_network_proxy::NetworkProxyHandle;
@@ -52,6 +53,7 @@ struct PreparedWindowsSandboxRequest {
     windows_sandbox_level: codex_protocol::config_types::WindowsSandboxLevel,
     proxy_enforced: bool,
     network_proxy_restricting_sid: Option<String>,
+    proxy_settings_mode: WindowsSandboxProxySettingsMode,
     filesystem_overrides: Option<WindowsSandboxFilesystemOverrides>,
     use_private_desktop: bool,
 }
@@ -66,7 +68,7 @@ impl PreparedExecRequest {
                 windows_sandbox_level: request.windows_sandbox_level,
                 proxy_enforced: request.proxy_enforced,
                 network_proxy_restricting_sid: request.network_proxy_restricting_sid.as_deref(),
-                proxy_settings_mode: WindowsSandboxProxySettingsMode::Reconcile,
+                proxy_settings_mode: request.proxy_settings_mode,
                 filesystem_overrides: request.filesystem_overrides.as_ref(),
                 use_private_desktop: request.use_private_desktop,
             })
@@ -78,6 +80,7 @@ pub(crate) async fn prepare_exec_request(
     env: HashMap<String, String>,
     runtime_paths: Option<&ExecServerRuntimePaths>,
     network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
+    network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
 ) -> Result<PreparedExecRequest, JSONRPCErrorError> {
     #[cfg(target_os = "windows")]
     let mut env = env;
@@ -101,6 +104,7 @@ pub(crate) async fn prepare_exec_request(
             network_proxy,
             env,
             network_policy_decider,
+            network_policy_audit_observer,
         )
         .await?;
     let Some(sandbox_context) = params.sandbox.as_ref() else {
@@ -114,6 +118,9 @@ pub(crate) async fn prepare_exec_request(
             windows_sandbox: None,
         });
     };
+    let windows_sandbox_proxy_settings_mode = sandbox_context
+        .windows_sandbox_proxy_settings_mode
+        .unwrap_or_default();
     let runtime_paths = runtime_paths
         .ok_or_else(|| invalid_params("sandbox runtime paths are not configured".to_string()))?;
     // TODO(jif): Transport permissions before orchestrator-local paths are materialized,
@@ -146,6 +153,7 @@ pub(crate) async fn prepare_exec_request(
         managed_mitm_ca_trust_bundle_path.as_ref(),
         native_sandbox_policy_cwd.as_path(),
     );
+    #[cfg(unix)]
     let (file_system_policy, network_policy) = permissions.to_runtime_permissions();
     #[cfg(unix)]
     let sandbox_helper_paths = params
@@ -175,8 +183,7 @@ pub(crate) async fn prepare_exec_request(
     );
     let sandbox_manager = SandboxManager::new();
     let sandbox = sandbox_manager.select_initial(
-        &file_system_policy,
-        network_policy,
+        &permissions,
         SandboxablePreference::Require,
         sandbox_context.windows_sandbox_level,
         params.enforce_managed_network,
@@ -212,8 +219,7 @@ pub(crate) async fn prepare_exec_request(
     let (program, args) = (program.into(), args.to_vec());
     let transform_request = SandboxDirectSpawnTransformRequest {
         workspace_roots,
-        windows_sandbox_proxy_settings_mode:
-            codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile,
+        windows_sandbox_proxy_settings_mode,
         transform: SandboxTransformRequest {
             command: SandboxCommand {
                 program,
@@ -245,10 +251,8 @@ pub(crate) async fn prepare_exec_request(
     let windows_sandbox = if sandbox == SandboxType::WindowsRestrictedToken {
         request.arg0 = params.arg0.clone();
         let proxy_enforced = params.enforce_managed_network;
-        let use_elevated = windows_sandbox_uses_elevated_backend(
-            sandbox_context.windows_sandbox_level,
-            proxy_enforced,
-        );
+        let use_elevated =
+            windows_sandbox_uses_elevated_backend(sandbox_context.windows_sandbox_level);
         let filesystem_overrides = if use_elevated {
             resolve_windows_elevated_filesystem_overrides(
                 sandbox,
@@ -271,6 +275,7 @@ pub(crate) async fn prepare_exec_request(
             windows_sandbox_level: sandbox_context.windows_sandbox_level,
             proxy_enforced,
             network_proxy_restricting_sid,
+            proxy_settings_mode: windows_sandbox_proxy_settings_mode,
             filesystem_overrides,
             use_private_desktop: sandbox_context.windows_sandbox_private_desktop,
         })
@@ -293,6 +298,7 @@ async fn prepare_managed_network(
     network_proxy: Option<&RemoteNetworkProxyLaunchConfig>,
     env: HashMap<String, String>,
     network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
+    network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
 ) -> Result<
     (
         HashMap<String, String>,
@@ -305,8 +311,11 @@ async fn prepare_managed_network(
     let Some(network_proxy) = network_proxy.cloned() else {
         return Ok((env, managed_network.cloned(), None, None));
     };
-    let state = NetworkProxyState::from_remote_launch_config(network_proxy)
+    let mut state = NetworkProxyState::from_remote_launch_config(network_proxy)
         .map_err(|err| invalid_params(format!("invalid network proxy config: {err}")))?;
+    if let Some(observer) = network_policy_audit_observer {
+        state.set_policy_audit_observer(observer);
+    }
     let mut builder = NetworkProxy::builder().state(Arc::new(state));
     if let Some(network_policy_decider) = network_policy_decider {
         builder = builder.policy_decider_arc(network_policy_decider);

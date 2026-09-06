@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Primary acceptance source for Goal/Guardian/Shadow behavior, provenance, CI, and release artifacts."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Review the end-to-end typed report and lifecycle data flow rather than isolated crate changes."}
+{"file": ".trellis/spec/guides/cross-platform-thinking-guide.md", "reason": "Review host-independent manifests, source materialization, native dependencies, and artifact evidence."}
+{"file": ".trellis/tasks/09-06-codex-stable-upgrade/research/upstream-audit.md", "reason": "Check the final migration against the audited target and every identified conflict boundary."}
+{"file": ".trellis/tasks/09-06-codex-stable-upgrade/research/agent-goal-dispatch-audit.md", "reason": "Audit that delegation either proved persisted Goal-before-dispatch ordering or remained fully inline with no agent dispatches."}

@@ -160,7 +160,21 @@ jobs:
           git -C "$goal_only" remote add origin https://github.com/openai/codex.git
           git -C "$goal_only" fetch --quiet --depth=1 --filter=blob:none origin "$commit"
           git -C "$goal_only" checkout --quiet --detach FETCH_HEAD
-          git -C "$goal_only" apply "$GITHUB_WORKSPACE/patches/goal-old-continuation.patch"
+          python - "$goal_only" <<'PY'
+          import sys
+          from pathlib import Path
+
+          from scripts.verify_provenance import apply_patch, patch_application
+
+          work = Path(sys.argv[1])
+          patch = Path("patches/goal-old-continuation.patch").resolve()
+          apply_patch(
+              work,
+              patch,
+              patch_application(patch),
+              fetch_preimages=True,
+          )
+          PY
           cargo test --manifest-path "$goal_only/codex-rs/Cargo.toml" -p codex-goal-extension turn_error_
 
       - name: Check Shadow extension

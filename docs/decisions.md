@@ -1,11 +1,16 @@
 # Decisions
 
-- Source snapshot: `killbus/codex-goal-auto-retry-build` commit
-  `ea17de047b46e9584ffba2d2bda2dc3ae5a5aff8`.
-- Official baseline: `openai/codex` commit
-  `bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb`, tag `rust-v0.146.0-alpha.3`.
+- Official baseline: the complete `openai/codex` release `rust-v0.153.4`, source
+  commit `3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`. Upstream behavior is retained
+  as one authoritative baseline rather than decomposed into fork deliverables.
+- The immutable Goal patch originated from
+  `killbus/codex-goal-auto-retry-build` commit
+  `ea17de047b46e9584ffba2d2bda2dc3ae5a5aff8` and records upstream preimage
+  commit `bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb`. It is applied to the new
+  baseline with deterministic three-way semantics.
 - Tree states are pristine, goal-only, and integrated; the fixed patch order is
-  `goal-old-continuation.patch` followed directly by `shadow-mind.patch`.
+  `goal-old-continuation.patch` followed directly by a regenerated
+  `shadow-mind.patch`.
 - The inherited Goal patch is the final continuation policy. Every terminal turn
   error except `UsageLimitExceeded` leaves the Goal active for idle continuation;
   no transient-only classifier or consecutive-failure breaker is layered on top.

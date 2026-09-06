@@ -77,6 +77,9 @@ the checked-out provenance document. It must not duplicate those values as
 Python constants: the build jobs write `BUILD-INFO.txt` from the same versioned
 document, and a second manually synchronized list can silently retain a removed
 patch until the final release audit.
+Release-relevant source files are recorded independently under
+`source_file_sha256`; this keeps an unchanged `codex-rs/Cargo.lock` auditable
+without misclassifying it as a materialization difference.
 
 ### 4. Validation & Error Matrix
 
@@ -104,7 +107,7 @@ patch until the final release audit.
   or hard-coded provenance values.
 - Artifact `BUILD-INFO.txt` differs from the current provenance document -> fail
   on the exact field; preserve `patch_sha256` list order and use the source-side
-  Cargo.lock digest recorded under `changed_files`.
+  Cargo.lock digest recorded under `source_file_sha256`.
 - Missing distribution overrides -> the intentionally symbol-bearing Cargo
   intermediate may be archived directly; fail the workflow contract review and
   restore the scoped overrides rather than inventing a size threshold.

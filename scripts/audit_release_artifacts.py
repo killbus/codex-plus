@@ -56,11 +56,10 @@ def load_expected_provenance(path: Path) -> dict[str, str]:
     source_tree = provenance.get("source_tree_sha256")
     rebuilt_tree = provenance.get("rebuilt_tree_sha256")
     patch_hashes = provenance.get("patch_sha256")
-    changed_files = provenance.get("changed_files")
+    source_file_sha256 = provenance.get("source_file_sha256")
     cargo_lock = (
-        changed_files.get("codex-rs/Cargo.lock", {}).get("source")
-        if isinstance(changed_files, dict)
-        and isinstance(changed_files.get("codex-rs/Cargo.lock"), dict)
+        source_file_sha256.get("codex-rs/Cargo.lock")
+        if isinstance(source_file_sha256, dict)
         else None
     )
 

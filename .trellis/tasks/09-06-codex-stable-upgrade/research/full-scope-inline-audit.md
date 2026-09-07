@@ -527,6 +527,30 @@ and rebuilt tree hash
 `2bb966c5ad5649cfae4ca42c9851b30e69d976310bdc3c98256bfc6d1457276e`.
 A replacement exact-SHA CI run is required before the branch can be accepted.
 
+GitHub Actions run `34092736317` tested branch commit
+`8876f72e33469ef8180e43bc6e020b20691f9ce2` on 2026-09-07. The Shadow
+runtime job and the Goal retry/shared-upstream regression job passed. The Rust
+job passed formatting, provenance reconstruction, schema and Bazel generation
+and drift checks, all affected package checks and tests, the Goal lifecycle
+test with Shadow enabled, TUI integration, and rollout persistence. Its only
+failure was affected-crate Clippy with `-D warnings`: the upstream
+`core/tests/suite/openai_file_mcp.rs` fixture imported the `body_json` matcher
+without using it. The file uses `body_partial_json`; its `set_body_json` calls
+are `ResponseTemplate` methods and do not consume the matcher import.
+
+The corrective delta removes only that unused import from `codex-src` and the
+integration staging tree. It changes no matcher, fixture behavior, Goal/Shadow
+lifecycle, retry policy, or upstream runtime capability. The Shadow patch was
+regenerated from the complete staging diff and now has SHA-256
+`0a18b78fb6facc930ab70eb5e593633b23438c2a27a7c2a4737fc5c376151960`.
+The immutable Goal patch remains
+`eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6`.
+Exact two-patch reconstruction now records source tree hash
+`6fba68d5b068e348a76f67a6cd18105af81809487501067db4727147aec5ac55`
+and rebuilt tree hash
+`6401db674bd8f27a75a8855524dbb95d1700964805afcab8dac6ab7c2c2ecbe1`.
+A replacement exact-SHA CI run remains required before branch acceptance.
+
 GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
 with `-D warnings`, app-server schema generation/drift, Bazel lock generation/
 drift, and the six-target CLI release. The configured targets are Windows x64,
@@ -584,7 +608,7 @@ All permitted local checks passed on 2026-09-07:
 - Exact two-patch `scripts/verify_provenance.py --check` reconstruction.
 - Immutable Goal and regenerated Shadow patch SHA-256 checks.
 - Full staging diff matches `patches/shadow-mind.patch` byte-for-byte, and all
-  87 integration paths match their `codex-src/` counterparts.
+  88 integration paths match their `codex-src/` counterparts.
 - AST enumeration covers 108 `ThreadItem` match expressions with no exhaustive
   19-of-20 omission of `ShadowReport`.
 - Stale old-tag scan and Goal preimage reference allowlist.

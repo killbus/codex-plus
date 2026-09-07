@@ -469,16 +469,13 @@ impl Session {
                         codex_protocol::turn_input::TurnStartOptions::default(),
                     )
                 } else {
-                    let mailbox_items = self
+                    self
                         .input_queue
-                        .drain_mailbox_input_items_for_turn_start(pending_turn_start)
-                        .await;
-                    let mut pending_items = self
-                        .input_queue
-                        .take_pending_input_for_turn_state(turn_state.as_ref())
-                        .await;
-                    pending_items.extend(mailbox_items);
-                    (pending_items, pending_turn_start.start_options.clone())
+                        .take_pending_input_for_turn_start(
+                            turn_state.as_ref(),
+                            pending_turn_start,
+                        )
+                        .await
                 }
             }
         };
@@ -540,11 +537,11 @@ impl Session {
             .await
             .clear_turn(&turn_context.sub_id);
         if turn_context.turn_metadata_state.root_turn_id().is_none()
-            && let Some(root_turn_id) = start_options.root_turn_id
+            && let Some(root_turn_id) = start_options.root_turn_id.as_ref()
         {
             turn_context
                 .turn_metadata_state
-                .set_root_turn_id(root_turn_id);
+                .set_root_turn_id(root_turn_id.clone());
         }
         assert!(turn.task.is_none(), "cannot overwrite an installed task");
         assert!(
@@ -555,7 +552,11 @@ impl Session {
         let turn_state = Arc::clone(&turn.turn_state);
         turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
         self.input_queue
-            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
+            .extend_pending_input_with_start_options_for_turn_state(
+                turn_state.as_ref(),
+                pending_items,
+                start_options,
+            )
             .await;
         self.emit_turn_start_lifecycle(turn_context.as_ref(), &token_usage_at_turn_start)
             .await;

@@ -9406,7 +9406,7 @@ index 6c103f266c..b5cc916bce 100644
      #[expect(
          clippy::await_holding_invalid_type,
 diff --git a/codex-rs/core/src/session/input_queue.rs b/codex-rs/core/src/session/input_queue.rs
-index e6bd3ba388..9901f41e92 100644
+index e6bd3ba388..ef0dd56ad6 100644
 --- a/codex-rs/core/src/session/input_queue.rs
 +++ b/codex-rs/core/src/session/input_queue.rs
 @@ -4,6 +4,8 @@ use crate::state::TurnState;
@@ -9435,7 +9435,63 @@ index e6bd3ba388..9901f41e92 100644
      InterAgentCommunication(InterAgentCommunication),
  }
  
-@@ -87,6 +90,13 @@ struct PendingMailboxCommunication {
+@@ -73,6 +76,55 @@ pub(crate) enum InputQueueActivity {
+ #[derive(Default)]
+ pub(crate) struct TurnInputQueue {
+     items: Vec<TurnInput>,
++    start_options: PendingTurnStartOptions,
++}
++
++#[derive(Default)]
++struct PendingTurnStartOptions {
++    has_trigger_turn: bool,
++    start_options: TurnStartOptions,
++}
++
++impl PendingTurnStartOptions {
++    fn from_input(input: &[TurnInput], start_options: TurnStartOptions) -> Self {
++        let has_trigger_turn = input.iter().any(|item| {
++            matches!(
++                item,
++                TurnInput::InterAgentCommunication(communication) if communication.trigger_turn
++            )
++        });
++        Self {
++            has_trigger_turn,
++            start_options: if has_trigger_turn {
++                start_options
++            } else {
++                TurnStartOptions::default()
++            },
++        }
++    }
++
++    fn append(&mut self, later: Self) {
++        if !later.has_trigger_turn {
++            return;
++        }
++        if !self.has_trigger_turn {
++            *self = later;
++            return;
++        }
++
++        let parent_turn_id = self
++            .start_options
++            .parent_turn_id
++            .as_deref()
++            .filter(|id| !id.trim().is_empty())
++            .filter(|id| later.start_options.parent_turn_id.as_deref() == Some(*id))
++            .map(str::to_string);
++        let root_turn_id = self.start_options.root_turn_id.clone();
++        self.start_options = later.start_options;
++        self.start_options.parent_turn_id = parent_turn_id;
++        self.start_options.root_turn_id = root_turn_id;
++        self.has_trigger_turn = true;
++    }
+ }
+ 
+ /// Session-scoped pending input storage and active-turn mailbox delivery coordination.
+@@ -87,6 +139,13 @@ struct PendingMailboxCommunication {
      _diagnostics_guard: GaugeGuard,
  }
  
@@ -9449,7 +9505,7 @@ index e6bd3ba388..9901f41e92 100644
  impl InputQueue {
      pub(crate) fn new() -> Self {
          let (activity_tx, _) = watch::channel(InputQueueActivity::Mailbox);
-@@ -147,13 +157,9 @@ impl InputQueue {
+@@ -147,13 +206,9 @@ impl InputQueue {
              .any(|mail| mail.communication.trigger_turn)
      }
  
@@ -9466,7 +9522,7 @@ index e6bd3ba388..9901f41e92 100644
          // A later follow-up supersedes the earlier choice, including an omitted choice.
          let mut start_options = pending_mails
              .iter()
-@@ -179,10 +185,57 @@ impl InputQueue {
+@@ -179,10 +234,57 @@ impl InputQueue {
                      .filter(|id| !id.trim().is_empty())
              })
              .map(str::to_string);
@@ -9527,7 +9583,151 @@ index e6bd3ba388..9901f41e92 100644
          (items, start_options)
      }
  
-@@ -388,7 +441,11 @@ mod tests {
+@@ -205,7 +307,7 @@ impl InputQueue {
+     pub(crate) async fn clear_pending(&self, active_turn: &ActiveTurn) {
+         let mut turn_state = active_turn.turn_state.lock().await;
+         turn_state.clear_pending_waiters();
+-        turn_state.pending_input.items.clear();
++        turn_state.pending_input.clear();
+     }
+ 
+     pub(crate) async fn defer_mailbox_delivery_to_next_turn(
+@@ -261,7 +363,7 @@ impl InputQueue {
+     ) {
+         {
+             let mut turn_state = turn_state.lock().await;
+-            turn_state.pending_input.items.extend(input);
++            turn_state.pending_input.extend(input);
+             turn_state.accept_mailbox_delivery_for_current_turn();
+         }
+         self.activity_tx.send_replace(InputQueueActivity::Steer);
+@@ -272,14 +374,43 @@ impl InputQueue {
+         turn_state: &Mutex<TurnState>,
+         input: Vec<TurnInput>,
+     ) {
+-        turn_state.lock().await.pending_input.items.extend(input);
++        turn_state.lock().await.pending_input.extend(input);
++    }
++
++    pub(crate) async fn extend_pending_input_with_start_options_for_turn_state(
++        &self,
++        turn_state: &Mutex<TurnState>,
++        input: Vec<TurnInput>,
++        start_options: TurnStartOptions,
++    ) {
++        turn_state
++            .lock()
++            .await
++            .pending_input
++            .extend_with_start_options(input, start_options);
+     }
+ 
+     pub(crate) async fn take_pending_input_for_turn_state(
+         &self,
+         turn_state: &Mutex<TurnState>,
+     ) -> Vec<TurnInput> {
+-        turn_state.lock().await.pending_input.items.split_off(0)
++        turn_state.lock().await.pending_input.take().items
++    }
++
++    pub(crate) async fn take_pending_input_for_turn_start(
++        &self,
++        turn_state: &Mutex<TurnState>,
++        pending_turn_start: &PendingMailboxTurnStart,
++    ) -> (Vec<TurnInput>, TurnStartOptions) {
++        let mut pending_input = turn_state.lock().await.pending_input.take();
++        let mailbox_items = self
++            .drain_mailbox_input_items_for_turn_start(pending_turn_start)
++            .await;
++        pending_input.extend_with_start_options(
++            mailbox_items,
++            pending_turn_start.start_options.clone(),
++        );
++        pending_input.into_parts()
+     }
+ 
+     #[expect(
+@@ -302,9 +433,9 @@ impl InputQueue {
+                     let accepts_mailbox_delivery =
+                         turn_state.accepts_mailbox_delivery_for_current_turn();
+                     let pending_input = if accepts_mailbox_delivery {
+-                        turn_state.pending_input.items.split_off(0)
++                        turn_state.pending_input.take()
+                     } else {
+-                        Vec::new()
++                        TurnInputQueue::default()
+                     };
+                     (
+                         pending_input,
+@@ -312,26 +443,23 @@ impl InputQueue {
+                         active_turn_metadata,
+                     )
+                 }
+-                None => (Vec::new(), true, None),
++                None => (TurnInputQueue::default(), true, None),
+             }
+         };
+         if !accepts_mailbox_delivery {
+-            return (pending_input, TurnStartOptions::default());
++            return pending_input.into_parts();
+         }
+-        let (mailbox_items, start_options) = self.drain_mailbox_input_items().await;
++        let (mailbox_items, mailbox_start_options) = self.drain_mailbox_input_items().await;
++        let mut pending_input = pending_input;
++        pending_input.extend_with_start_options(mailbox_items, mailbox_start_options);
++        let (pending_input, start_options) = pending_input.into_parts();
+         if let Some(active_turn_metadata) = active_turn_metadata
+             && active_turn_metadata.root_turn_id().is_none()
+             && let Some(root_turn_id) = start_options.root_turn_id.as_ref()
+         {
+             active_turn_metadata.set_root_turn_id(root_turn_id.clone());
+         }
+-        if pending_input.is_empty() {
+-            (mailbox_items, start_options)
+-        } else {
+-            let mut pending_input = pending_input;
+-            pending_input.extend(mailbox_items);
+-            (pending_input, start_options)
+-        }
++        (pending_input, start_options)
+     }
+ 
+     #[expect(
+@@ -363,6 +491,33 @@ impl InputQueue {
+ }
+ 
+ impl TurnInputQueue {
++    fn clear(&mut self) {
++        self.items.clear();
++        self.start_options = PendingTurnStartOptions::default();
++    }
++
++    fn extend(&mut self, input: Vec<TurnInput>) {
++        self.extend_with_start_options(input, TurnStartOptions::default());
++    }
++
++    fn extend_with_start_options(
++        &mut self,
++        input: Vec<TurnInput>,
++        start_options: TurnStartOptions,
++    ) {
++        let later_start_options = PendingTurnStartOptions::from_input(&input, start_options);
++        self.items.extend(input);
++        self.start_options.append(later_start_options);
++    }
++
++    fn take(&mut self) -> Self {
++        std::mem::take(self)
++    }
++
++    fn into_parts(self) -> (Vec<TurnInput>, TurnStartOptions) {
++        (self.items, self.start_options.start_options)
++    }
++
+     fn has_pending_input(&self) -> bool {
+         self.items.iter().any(|input| {
+             matches!(
+@@ -388,7 +543,11 @@ mod tests {
          let value = serde_json::json!({"ResponseItem": item});
  
          assert_eq!(serde_json::to_value(&input).unwrap(), value);
@@ -9540,7 +9740,7 @@ index e6bd3ba388..9901f41e92 100644
  
          let annotated = TurnInput::ResponseItem(ResponseItemEnvelope {
              item: ResponseItem::Other,
-@@ -543,14 +600,76 @@ mod tests {
+@@ -543,14 +702,76 @@ mod tests {
              .enqueue_mailbox_communication(mail_two.clone(), Default::default())
              .await;
  
@@ -9623,6 +9823,81 @@ index e6bd3ba388..9901f41e92 100644
      }
  
      #[tokio::test]
+@@ -626,6 +847,74 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn turn_input_queue_merges_start_options_across_ordered_batches() {
++        use codex_protocol::turn_input::CyberAccessProgram;
++
++        let first = make_mail(AgentPath::root(), AgentPath::root(), "first", true);
++        let passive = make_mail(AgentPath::root(), AgentPath::root(), "passive", false);
++        let second = make_mail(AgentPath::root(), AgentPath::root(), "second", true);
++        let mut pending_input = TurnInputQueue::default();
++        pending_input.extend_with_start_options(
++            vec![TurnInput::InterAgentCommunication(first.clone())],
++            TurnStartOptions {
++                turn_trigger: Some("first".to_owned()),
++                final_output_json_schema: Some(serde_json::json!({"batch": 1})),
++                service_tier: Some("first-tier".to_owned()),
++                parent_turn_id: Some("first-parent".to_owned()),
++                root_turn_id: Some("first-root".to_owned()),
++                cyber_access_program: Some(CyberAccessProgram::DaybreakBlue),
++            },
++        );
++        pending_input.extend_with_start_options(
++            vec![TurnInput::InterAgentCommunication(passive.clone())],
++            TurnStartOptions {
++                turn_trigger: Some("ignored".to_owned()),
++                final_output_json_schema: Some(serde_json::json!({"batch": "ignored"})),
++                service_tier: Some("ignored-tier".to_owned()),
++                parent_turn_id: Some("ignored-parent".to_owned()),
++                root_turn_id: Some("ignored-root".to_owned()),
++                cyber_access_program: Some(CyberAccessProgram::DaybreakRed),
++            },
++        );
++        pending_input.extend_with_start_options(
++            vec![TurnInput::InterAgentCommunication(second.clone())],
++            TurnStartOptions {
++                turn_trigger: Some("second".to_owned()),
++                final_output_json_schema: Some(serde_json::json!({"batch": 2})),
++                service_tier: Some("second-tier".to_owned()),
++                parent_turn_id: Some("second-parent".to_owned()),
++                root_turn_id: Some("second-root".to_owned()),
++                cyber_access_program: Some(CyberAccessProgram::Standard),
++            },
++        );
++
++        let (items, start_options) = pending_input.into_parts();
++        let [
++            TurnInput::InterAgentCommunication(actual_first),
++            TurnInput::InterAgentCommunication(actual_passive),
++            TurnInput::InterAgentCommunication(actual_second),
++        ] = items.as_slice()
++        else {
++            panic!("expected all pending communications in arrival order");
++        };
++        assert_eq!(actual_first, &first);
++        assert_eq!(actual_passive, &passive);
++        assert_eq!(actual_second, &second);
++        assert_eq!(start_options.turn_trigger.as_deref(), Some("second"));
++        assert_eq!(
++            start_options.final_output_json_schema,
++            Some(serde_json::json!({"batch": 2}))
++        );
++        assert_eq!(start_options.service_tier.as_deref(), Some("second-tier"));
++        assert_eq!(start_options.parent_turn_id, None);
++        assert_eq!(start_options.root_turn_id.as_deref(), Some("first-root"));
++        assert_eq!(
++            start_options.cyber_access_program,
++            Some(CyberAccessProgram::Standard)
++        );
++    }
++
+     #[tokio::test]
+     async fn input_queue_tracks_pending_trigger_turn_mail() {
+         let input_queue = InputQueue::new();
 diff --git a/codex-rs/core/src/session/mod.rs b/codex-rs/core/src/session/mod.rs
 index 91300365bb..f580023777 100644
 --- a/codex-rs/core/src/session/mod.rs
@@ -11404,7 +11679,7 @@ index cde3fc7d72..c44181f938 100644
              contributor
                  .on_turn_abort(codex_extension_api::TurnAbortInput {
 diff --git a/codex-rs/core/src/tasks/mod.rs b/codex-rs/core/src/tasks/mod.rs
-index 5bf41019d5..fe6068c65b 100644
+index 5bf41019d5..981e603804 100644
 --- a/codex-rs/core/src/tasks/mod.rs
 +++ b/codex-rs/core/src/tasks/mod.rs
 @@ -9,6 +9,7 @@ use std::time::Duration;
@@ -11537,7 +11812,7 @@ index 5bf41019d5..fe6068c65b 100644
      pub async fn spawn_task<T: SessionTask>(
          self: &Arc<Self>,
          turn_context: Arc<TurnContext>,
-@@ -285,9 +393,134 @@ impl Session {
+@@ -285,9 +393,131 @@ impl Session {
          input: Vec<TurnInput>,
          task: T,
      ) {
@@ -11617,16 +11892,13 @@ index 5bf41019d5..fe6068c65b 100644
 +                        codex_protocol::turn_input::TurnStartOptions::default(),
 +                    )
 +                } else {
-+                    let mailbox_items = self
++                    self
 +                        .input_queue
-+                        .drain_mailbox_input_items_for_turn_start(pending_turn_start)
-+                        .await;
-+                    let mut pending_items = self
-+                        .input_queue
-+                        .take_pending_input_for_turn_state(turn_state.as_ref())
-+                        .await;
-+                    pending_items.extend(mailbox_items);
-+                    (pending_items, pending_turn_start.start_options.clone())
++                        .take_pending_input_for_turn_start(
++                            turn_state.as_ref(),
++                            pending_turn_start,
++                        )
++                        .await
 +                }
 +            }
 +        };
@@ -11672,18 +11944,20 @@ index 5bf41019d5..fe6068c65b 100644
          let started_at = Instant::now();
          let turn_started_at_unix_ms = turn_context
              .turn_timing_state
-@@ -306,8 +539,6 @@ impl Session {
+@@ -306,31 +536,31 @@ impl Session {
              .lock()
              .await
              .clear_turn(&turn_context.sub_id);
 -
 -        let (pending_items, start_options) = self.input_queue.drain_mailbox_input_items().await;
          if turn_context.turn_metadata_state.root_turn_id().is_none()
-             && let Some(root_turn_id) = start_options.root_turn_id
+-            && let Some(root_turn_id) = start_options.root_turn_id
++            && let Some(root_turn_id) = start_options.root_turn_id.as_ref()
          {
-@@ -315,12 +546,13 @@ impl Session {
+             turn_context
                  .turn_metadata_state
-                 .set_root_turn_id(root_turn_id);
+-                .set_root_turn_id(root_turn_id);
++                .set_root_turn_id(root_turn_id.clone());
          }
 -        let turn_state = {
 -            let mut active = self.active_turn.lock().await;
@@ -11700,8 +11974,13 @@ index 5bf41019d5..fe6068c65b 100644
 +        let turn_state = Arc::clone(&turn.turn_state);
          turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
          self.input_queue
-             .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
-@@ -328,9 +560,6 @@ impl Session {
+-            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
++            .extend_pending_input_with_start_options_for_turn_state(
++                turn_state.as_ref(),
++                pending_items,
++                start_options,
++            )
+             .await;
          self.emit_turn_start_lifecycle(turn_context.as_ref(), &token_usage_at_turn_start)
              .await;
  
@@ -11711,7 +11990,7 @@ index 5bf41019d5..fe6068c65b 100644
          let agent_execution_guard = self.services.agent_control.execution_guard(
              turn_context.multi_agent_version,
              &turn_context.session_source,
-@@ -409,6 +638,8 @@ impl Session {
+@@ -409,6 +639,8 @@ impl Session {
              _timer: timer,
          };
          turn.task = Some(running_task);
@@ -11720,7 +11999,7 @@ index 5bf41019d5..fe6068c65b 100644
      }
  
      /// Returns whether an extension has marked this thread as durably asleep.
-@@ -456,42 +687,62 @@ impl Session {
+@@ -456,42 +688,62 @@ impl Session {
              if active_turn.is_some() {
                  return;
              }
@@ -11802,7 +12081,7 @@ index 5bf41019d5..fe6068c65b 100644
              }
              turn_context.turn_metadata_state.set_parent_turn_id(id);
          }
-@@ -500,11 +751,18 @@ impl Session {
+@@ -500,11 +752,18 @@ impl Session {
          }
          self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
              .await;
@@ -11826,7 +12105,7 @@ index 5bf41019d5..fe6068c65b 100644
              .await;
      }
  
-@@ -526,7 +784,7 @@ impl Session {
+@@ -526,7 +785,7 @@ impl Session {
          }
  
          if let Some(turn_context) = turn_context.as_deref() {
@@ -11835,7 +12114,7 @@ index 5bf41019d5..fe6068c65b 100644
                  .await;
          }
          if let Some(active_turn) = active_turn_to_clear {
-@@ -573,7 +831,7 @@ impl Session {
+@@ -573,7 +832,7 @@ impl Session {
                  .await;
          }
          if let Some(turn_context) = turn_context.as_deref() {
@@ -11844,7 +12123,7 @@ index 5bf41019d5..fe6068c65b 100644
                  .await;
          }
          // Let interrupted tasks observe cancellation before dropping pending approvals, or an
-@@ -808,7 +1066,7 @@ impl Session {
+@@ -808,7 +1067,7 @@ impl Session {
              if reason == TurnAbortReason::Interrupted {
                  run_turn_interrupt_hooks(self, &turn_context, &turn_state).await;
              }
@@ -11853,7 +12132,7 @@ index 5bf41019d5..fe6068c65b 100644
                  .await;
              EventMsg::TurnAborted(TurnAbortedEvent {
                  turn_id: Some(turn_context.sub_id.clone()),
-@@ -823,8 +1081,7 @@ impl Session {
+@@ -823,8 +1082,7 @@ impl Session {
                  .time_to_first_token_ms()
                  .await;
              let error = turn_context.terminal_error.lock().await.clone();
@@ -14127,6 +14406,73 @@ index de6eb5f405..352400f719 100644
  #[tokio::test]
  async fn goal_edit_slash_command_opens_goal_editor() {
      for thread_id in [Some(ThreadId::new()), None] {
+diff --git a/codex-rs/tui/src/dynamic_tools.rs b/codex-rs/tui/src/dynamic_tools.rs
+index f50c0d5d25..a7875f2334 100644
+--- a/codex-rs/tui/src/dynamic_tools.rs
++++ b/codex-rs/tui/src/dynamic_tools.rs
+@@ -1075,7 +1075,8 @@ async fn execute_inner(
+                                     | ThreadItem::ImageView { .. }
+                                     | ThreadItem::EnteredReviewMode { .. }
+                                     | ThreadItem::ExitedReviewMode { .. }
+-                                    | ThreadItem::ContextCompaction { .. } => None,
++                                    | ThreadItem::ContextCompaction { .. }
++                                    | ThreadItem::ShadowReport(_) => None,
+                                 })
+                                 });
+                             polls.push(json!({
+@@ -1499,6 +1500,13 @@ fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usize) -> Valu
+             ThreadItem::Sleep(item) => json!({
+                 "type": "sleep", "id": item.id, "durationMs": item.duration_ms
+             }),
++            ThreadItem::ShadowReport(item) => json!({
++                "type": "shadowReport",
++                "id": item.id,
++                "shadowId": item.shadow_id,
++                "shadowName": item.shadow_name,
++                "content": truncate(&item.content, DEFAULT_OUTPUT_CHARS)
++            }),
+             ThreadItem::ImageGeneration(item) => {
+                 let mut image = json!({
+                     "type": "imageGeneration", "id": item.id, "status": item.status,
+diff --git a/codex-rs/tui/src/dynamic_tools_tests.rs b/codex-rs/tui/src/dynamic_tools_tests.rs
+index b3d502ac6a..0ae97e1602 100644
+--- a/codex-rs/tui/src/dynamic_tools_tests.rs
++++ b/codex-rs/tui/src/dynamic_tools_tests.rs
+@@ -374,6 +374,34 @@ fn activity_metadata_is_retained_without_including_outputs() -> color_eyre::Resu
+     Ok(())
+ }
+ 
++#[test]
++fn turn_summary_preserves_shadow_report_identity_and_content() -> color_eyre::Result<()> {
++    let turn: Turn = serde_json::from_value(json!({
++        "id": "turn-1",
++        "status": "completed",
++        "items": [{
++            "type": "shadowReport",
++            "id": "shadow-report-1",
++            "shadowId": "reviewer",
++            "shadowName": "Reviewer",
++            "content": "Use the typed item boundary."
++        }]
++    }))?;
++
++    let summary = turn_summary(&turn, /*include_outputs*/ false, DEFAULT_OUTPUT_CHARS);
++    assert_eq!(
++        summary["items"],
++        json!([{
++            "type": "shadowReport",
++            "id": "shadow-report-1",
++            "shadowId": "reviewer",
++            "shadowName": "Reviewer",
++            "content": "Use the typed item boundary."
++        }])
++    );
++    Ok(())
++}
++
+ #[tokio::test]
+ async fn task_management_tools_use_existing_app_server_operations() -> color_eyre::Result<()> {
+     let (codex_home, server, source, target) = test_server().await?;
 diff --git a/codex-rs/tui/src/history_cell/mod.rs b/codex-rs/tui/src/history_cell/mod.rs
 index 4e51d50f7c..cf197b2a3a 100644
 --- a/codex-rs/tui/src/history_cell/mod.rs

@@ -374,6 +374,34 @@ fn activity_metadata_is_retained_without_including_outputs() -> color_eyre::Resu
     Ok(())
 }
 
+#[test]
+fn turn_summary_preserves_shadow_report_identity_and_content() -> color_eyre::Result<()> {
+    let turn: Turn = serde_json::from_value(json!({
+        "id": "turn-1",
+        "status": "completed",
+        "items": [{
+            "type": "shadowReport",
+            "id": "shadow-report-1",
+            "shadowId": "reviewer",
+            "shadowName": "Reviewer",
+            "content": "Use the typed item boundary."
+        }]
+    }))?;
+
+    let summary = turn_summary(&turn, /*include_outputs*/ false, DEFAULT_OUTPUT_CHARS);
+    assert_eq!(
+        summary["items"],
+        json!([{
+            "type": "shadowReport",
+            "id": "shadow-report-1",
+            "shadowId": "reviewer",
+            "shadowName": "Reviewer",
+            "content": "Use the typed item boundary."
+        }])
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn task_management_tools_use_existing_app_server_operations() -> color_eyre::Result<()> {
     let (codex_home, server, source, target) = test_server().await?;

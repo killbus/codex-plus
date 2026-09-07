@@ -25,7 +25,7 @@ Current integration state:
 - Pre-upgrade rollback commit: `632cc5b11a7a071bf5a3d45ccecfefa9a56ebcf5`.
 - Staging tree: `.trellis/.runtime/upgrade-staging`.
 - Staging base HEAD: `5352fbd14d09926a5217353f08a93c756c87c52a`.
-- Staged integration delta: 84 files, 5,711 insertions, and 300 deletions.
+- Staged integration delta: 86 files, 5,938 insertions, and 320 deletions.
 - Ordered patches: immutable Goal patch followed directly by the regenerated
   Shadow integration patch.
 
@@ -160,13 +160,13 @@ peeled source commit. Reconstruction uses this ordered chain:
    applied with deterministic three-way semantics using preimage commit
    `bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb`.
 2. `patches/shadow-mind.patch`, SHA-256
-   `f2a2cfb90ff225048de4bfeb9e60d1f2c22263a7471035208bbe0f1bb8e89137`,
+   `911efddd6382aae54c670750864a363a2771d52398da5a3682a838faf5251af7`,
    applied directly.
 
 The source tree digest is
-`b5037593461af45d642aee5f2c954b9541c0f304908b036d288b4e6380090111`;
+`af2edfc2de18be6d9cdc35c0d532648deb82813b20fd3f526c16e61b5fa813eb`;
 the rebuilt digest is
-`85ee99690aca1c0212dbfcb9440dda69c7345758dc69fd81168331a600905732`.
+`c519864f1abcbc133b9d4a91bf2c60479b8f736810134e28cc640bc49cdb1028`.
 The only expected materialization differences are the three recorded `.vscode`
 files. The source-side Cargo lock digest is recorded independently under
 `source_file_sha256` as
@@ -309,6 +309,148 @@ exact cached staging diff, all 84 staged integration files match `codex-src`,
 and the local provenance and release-audit suites pass. A replacement CI run is
 still required for compilation and runtime evidence.
 
+GitHub Actions run `34078985075` tested branch commit
+`bd45b02a92e758d8e25635bc20f622e226b9c9c8` on 2026-09-07. The Goal retry
+and upstream regression job passed. The Shadow runtime job reached its focused
+ownership regressions and failed only
+`pending_work_start_does_not_steal_user_pending_input_after_reservation_replacement`:
+the replacement user turn retained both queued inputs, but the trigger's
+`TurnStartOptions` had become default values.
+
+## Bug Analysis: Active-turn pending input lost mailbox start metadata
+
+### 1. Root Cause Category
+
+- **Category**: B - Cross-Layer Contract.
+- **Specific Cause**: `TurnInputQueue` represented ownership of `Vec<TurnInput>`
+  but not ownership of the aggregated `TurnStartOptions` that belonged to those
+  inputs. When pending-work ownership was replaced, the available-turn path
+  drained mailbox items and metadata together, then copied only the items into
+  `TurnState.pending_input`. A later read recovered the inputs from turn state
+  but found no mailbox metadata and therefore returned default options.
+
+### 2. Why Earlier Fixes Missed It
+
+1. The reservation fix made the observed mailbox prefix immutable and delayed
+   draining until ownership revalidation, but stopped tracing the data after the
+   mailbox-to-active-turn transfer.
+2. The facade fix made the reservation token compile across `session` and
+   `tasks`, but did not change the narrower `TurnInputQueue` data model.
+3. Static checks could prove patch and source consistency but could not execute
+   the remote-only Rust regression that exposed the metadata loss.
+
+Bayesian review began with mailbox-to-turn transfer loss as the dominant
+hypothesis. The test proved both inputs survived, directly contradicting item
+loss. Source tracing then showed ownership validation returns before draining on
+a stale reservation, contradicting rollback loss. The exact point where metadata
+disappeared was the `Vec<TurnInput>`-only active queue, raising confidence in the
+cross-layer data-model cause above 95 percent.
+
+### 3. Prevention Mechanisms
+
+| Priority | Mechanism | Specific Action | Status |
+| --- | --- | --- | --- |
+| P0 | Architecture | Store pending items and their aggregated start options in one `TurnInputQueue` value. | Done |
+| P0 | Test coverage | Keep the replacement regression and add a queue-level ordered-batch metadata merge regression. | Done |
+| P1 | Documentation | Record the bundled ownership and merge contract in the backend quality specification. | Done |
+
+### 4. Systematic Expansion
+
+- **Similar issues**: Any future path that takes, clears, defers, or transfers
+  pending input must account for both item bytes and start metadata.
+- **Design improvement**: Queue methods own bundling and ordered metadata merge;
+  callers no longer reconstruct that contract from separate values.
+- **Process improvement**: Ownership reviews must trace data through the next
+  storage boundary, not stop after proving reservation validation and draining.
+
+### 5. Knowledge Capture and Counter-review
+
+- [x] Updated the existing backend scenario instead of creating a duplicate rule.
+- [x] Added structural bundled storage and focused regression coverage.
+- [x] Confirmed no `src/templates/markdown/spec/` mirror exists in this repository.
+- [x] Rejected leaving metadata in the mailbox, because the items have already
+  moved and a later mailbox batch would no longer share their ownership.
+- [x] Rejected duplicating the items, because that would violate exactly-once
+  delivery.
+- [x] Rejected weakening the regression, because all six start-option fields are
+  part of the ownership contract.
+- [x] Audited every no-options `TurnInputQueue::extend` caller. Triggering
+  inter-agent input can use that path only when its start options have already
+  been applied to the newly created `TurnContext`, or while steering an existing
+  turn where start-only options intentionally do not apply. Other callers add
+  user, response, display, or queue-only input. No evidence supports changing
+  the queue merge semantics for this corrective delta.
+- [x] Re-ran the caller audit across `turn_input`, idle injection, active-turn
+  delivery, task completion, and cleanup. Start metadata is consumed only at the
+  turn-start boundary; later take/clear operations intentionally discard it
+  together with the owned items. No production path moves triggering mailbox
+  input into active-turn storage without either carrying its options or having
+  already installed those options on the active `TurnContext`.
+
+## Bug Analysis: Shadow report variant missed TUI exhaustive consumers
+
+### 1. Root Cause Category
+
+- **Category**: C - Change Propagation Failure.
+- **Specific Cause**: The public `ThreadItem::ShadowReport` variant was ported
+  through protocol, persistence, history, and primary rendering, but two
+  exhaustive matches in `tui/src/dynamic_tools.rs` were not updated. The latest
+  tool-marker projection needed an explicit no-op, while turn summaries needed
+  a typed Shadow report mapping.
+
+### 2. Why Earlier Fixes Missed It
+
+1. The semantic audit followed the report's primary live/replay path but did not
+   enumerate secondary consumers of the public enum.
+2. Static patch and provenance checks do not compile exhaustive Rust matches.
+3. The two failures were grouped under the Rust/TUI CI job, separate from the
+   focused Shadow runtime failure, so they required independent log inspection.
+
+The initial hypotheses were an incomplete generated-schema update, a stale TUI
+snapshot, or missed exhaustive consumers. The compiler identified the exact
+uncovered variant at both match sites, driving the third hypothesis above 99
+percent. Inspection then distinguished their contracts: a Shadow report is not
+a tool marker, but it is durable turn content that summaries must preserve.
+
+### 3. Prevention Mechanisms
+
+| Priority | Mechanism | Specific Action | Status |
+| --- | --- | --- | --- |
+| P0 | Compile-time | Keep exhaustive matches so a new public variant fails closed instead of disappearing behind a wildcard. | Done |
+| P0 | Test coverage | Add a turn-summary regression that preserves Shadow identity and content. | Done |
+| P1 | Documentation | Require an explicit semantic decision for every exhaustive public-enum consumer. | Done |
+
+### 4. Systematic Expansion
+
+- **Similar issues**: Any new `ThreadItem`, `TurnItem`, `ResponseItem`, or other
+  cross-layer enum variant can affect summaries, filtering, replay, export,
+  telemetry, and tool-marker projections outside its primary renderer.
+- **Design improvement**: Retain exhaustive matches at representation boundaries
+  and encode intentional non-applicability as a named variant arm.
+- **Process improvement**: Search all consumers of a changed public enum before
+  remote CI, then classify each match by preserve, ignore, or reject semantics.
+
+### 5. Knowledge Capture and Counter-review
+
+- [x] Updated the existing backend Shadow scenario with the exhaustive-consumer
+  rule instead of creating a disconnected checklist.
+- [x] Added explicit handling to both compiler-reported consumers.
+- [x] Added focused coverage for the preserving summary path.
+- [x] Confirmed the marker path should ignore the item because a Shadow report is
+  durable textual history, not a tool invocation or completion marker.
+- [x] Confirmed no `src/templates/markdown/spec/` mirror exists in this repository.
+- [x] Rejected a wildcard match because it would hide the next public-enum
+  propagation omission from the compiler.
+- [x] Ran an AST-level source enumeration over all Rust files. It found 108
+  `match` expressions containing `ThreadItem` patterns. Fourteen expressions
+  explicitly spell all 20 public variants, and every one includes
+  `ThreadItem::ShadowReport`; there are zero 19-of-20 matches missing only that
+  variant. These exhaustive consumers cover app-server media filtering,
+  protocol conversion, analytics, thread-store history/search, TUI replay,
+  transcript projection, status feeds, summaries, and marker selection. The
+  remaining matches are partial selectors, wildcard-based projections, or
+  single-variant destructuring/tests rather than unreviewed exhaustive consumers.
+
 GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
 with `-D warnings`, app-server schema generation/drift, Bazel lock generation/
 drift, and the six-target CLI release. The configured targets are Windows x64,
@@ -365,6 +507,10 @@ All permitted local checks passed on 2026-09-07:
 - `python3 -m unittest tests/test_release_artifact_audit.py`: 7 tests passed.
 - Exact two-patch `scripts/verify_provenance.py --check` reconstruction.
 - Immutable Goal and regenerated Shadow patch SHA-256 checks.
+- Full staging diff matches `patches/shadow-mind.patch` byte-for-byte, and all
+  86 integration paths match their `codex-src/` counterparts.
+- AST enumeration covers 108 `ThreadItem` match expressions with no exhaustive
+  19-of-20 omission of `ShadowReport`.
 - Stale old-tag scan and Goal preimage reference allowlist.
 - CJK scan over `AGENTS.md` and the active task artifacts: no matches.
 

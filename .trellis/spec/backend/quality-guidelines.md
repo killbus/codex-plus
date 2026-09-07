@@ -312,6 +312,10 @@ reported at the next idle edge, Shadow skips heartbeat scheduling. User turns,
 Goal continuations, and other extension origins retain their existing eligibility.
 Completed Shadow report items persist in both legacy and paginated history and
 map to the same app-server/TUI identity, content, and order on replay.
+Whenever a public history enum gains a variant, search every exhaustive match in
+all consumers before accepting the change. Each consumer must make an explicit
+semantic choice: preserve and map the item, intentionally ignore it, or reject
+it. A wildcard arm is not a substitute for reviewing the new variant.
 
 Pending-work startup must use one immutable mailbox observation for both context
 construction and final ownership transfer. `PendingMailboxTurnStart` records the
@@ -321,6 +325,14 @@ installation drains exactly that observed prefix and applies the same metadata.
 Messages that arrive after the observation remain queued for normal active-turn
 delivery or a later turn; they must not be attached to context built from the
 older snapshot.
+
+When mailbox input moves into an active turn's pending queue, its aggregated
+`TurnStartOptions` moves with the input as one ownership unit. Clearing or taking
+that queue clears or takes both parts. If later mailbox input is appended, merge
+metadata in arrival order using the mailbox rules: the latest triggering batch
+wins ordinary options, the first triggering batch supplies the root, parent
+lineage survives only when every triggering batch agrees on the same non-empty
+parent, and queue-only mail does not override triggering metadata.
 
 When this ownership token crosses from `session` into a sibling module such as
 `tasks`, expose the token through the crate-visible `session` facade. A sibling
@@ -366,12 +378,17 @@ validate the cross-module ownership handoff.
   and pending-work rejection emits no display lifecycle.
 - Input-queue and session regressions assert that pending-work startup applies one
   observed mailbox snapshot, drains only its exact prefix, preserves late
-  arrivals, and preserves every queued `TurnStartOptions` field when ownership is
-  replaced.
+  arrivals, preserves every queued `TurnStartOptions` field when ownership is
+  replaced, and applies the same ordered merge rules after mailbox input has
+  crossed into active-turn storage.
 - Shadow tests assert one-time report draining, UTF-8-safe size limits,
   cancellation cleanup, Shadow-only origin suppression, and Goal/user eligibility.
 - Rollout and thread-history tests assert legacy/paginated persistence and replay
   order; TUI snapshots assert live/replay identity, wrapping, and raw transcript.
+- Source review enumerates every exhaustive `ThreadItem` consumer. Focused tests
+  cover consumers that preserve the item, while intentionally non-applicable
+  consumers include an explicit no-op arm with a reason grounded in their output
+  contract.
 - GitHub Actions runs the affected package tests, schema generation/drift check,
   clippy/type-check, Goal patch hash, and ordered provenance verification.
 
@@ -399,6 +416,14 @@ its contract.
 
 Correct: re-export only `PendingMailboxTurnStart` as `pub(crate)` from
 `session`, and have sibling modules use that facade path.
+
+Wrong: add `ThreadItem::ShadowReport` to the public protocol and update only the
+primary renderer, leaving secondary summary or marker consumers to fail later at
+remote compilation.
+
+Correct: enumerate every exhaustive `ThreadItem` match when the variant is added;
+map Shadow reports into typed summaries and explicitly ignore them only where the
+consumer's contract does not apply, such as selecting the latest tool marker.
 
 ## Forbidden Patterns
 

@@ -1075,7 +1075,8 @@ async fn execute_inner(
                                     | ThreadItem::ImageView { .. }
                                     | ThreadItem::EnteredReviewMode { .. }
                                     | ThreadItem::ExitedReviewMode { .. }
-                                    | ThreadItem::ContextCompaction { .. } => None,
+                                    | ThreadItem::ContextCompaction { .. }
+                                    | ThreadItem::ShadowReport(_) => None,
                                 })
                                 });
                             polls.push(json!({
@@ -1498,6 +1499,13 @@ fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usize) -> Valu
             }),
             ThreadItem::Sleep(item) => json!({
                 "type": "sleep", "id": item.id, "durationMs": item.duration_ms
+            }),
+            ThreadItem::ShadowReport(item) => json!({
+                "type": "shadowReport",
+                "id": item.id,
+                "shadowId": item.shadow_id,
+                "shadowName": item.shadow_name,
+                "content": truncate(&item.content, DEFAULT_OUTPUT_CHARS)
             }),
             ThreadItem::ImageGeneration(item) => {
                 let mut image = json!({

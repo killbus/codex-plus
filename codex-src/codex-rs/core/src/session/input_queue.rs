@@ -76,6 +76,55 @@ pub(crate) enum InputQueueActivity {
 #[derive(Default)]
 pub(crate) struct TurnInputQueue {
     items: Vec<TurnInput>,
+    start_options: PendingTurnStartOptions,
+}
+
+#[derive(Default)]
+struct PendingTurnStartOptions {
+    has_trigger_turn: bool,
+    start_options: TurnStartOptions,
+}
+
+impl PendingTurnStartOptions {
+    fn from_input(input: &[TurnInput], start_options: TurnStartOptions) -> Self {
+        let has_trigger_turn = input.iter().any(|item| {
+            matches!(
+                item,
+                TurnInput::InterAgentCommunication(communication) if communication.trigger_turn
+            )
+        });
+        Self {
+            has_trigger_turn,
+            start_options: if has_trigger_turn {
+                start_options
+            } else {
+                TurnStartOptions::default()
+            },
+        }
+    }
+
+    fn append(&mut self, later: Self) {
+        if !later.has_trigger_turn {
+            return;
+        }
+        if !self.has_trigger_turn {
+            *self = later;
+            return;
+        }
+
+        let parent_turn_id = self
+            .start_options
+            .parent_turn_id
+            .as_deref()
+            .filter(|id| !id.trim().is_empty())
+            .filter(|id| later.start_options.parent_turn_id.as_deref() == Some(*id))
+            .map(str::to_string);
+        let root_turn_id = self.start_options.root_turn_id.clone();
+        self.start_options = later.start_options;
+        self.start_options.parent_turn_id = parent_turn_id;
+        self.start_options.root_turn_id = root_turn_id;
+        self.has_trigger_turn = true;
+    }
 }
 
 /// Session-scoped pending input storage and active-turn mailbox delivery coordination.
@@ -258,7 +307,7 @@ impl InputQueue {
     pub(crate) async fn clear_pending(&self, active_turn: &ActiveTurn) {
         let mut turn_state = active_turn.turn_state.lock().await;
         turn_state.clear_pending_waiters();
-        turn_state.pending_input.items.clear();
+        turn_state.pending_input.clear();
     }
 
     pub(crate) async fn defer_mailbox_delivery_to_next_turn(
@@ -314,7 +363,7 @@ impl InputQueue {
     ) {
         {
             let mut turn_state = turn_state.lock().await;
-            turn_state.pending_input.items.extend(input);
+            turn_state.pending_input.extend(input);
             turn_state.accept_mailbox_delivery_for_current_turn();
         }
         self.activity_tx.send_replace(InputQueueActivity::Steer);
@@ -325,14 +374,43 @@ impl InputQueue {
         turn_state: &Mutex<TurnState>,
         input: Vec<TurnInput>,
     ) {
-        turn_state.lock().await.pending_input.items.extend(input);
+        turn_state.lock().await.pending_input.extend(input);
+    }
+
+    pub(crate) async fn extend_pending_input_with_start_options_for_turn_state(
+        &self,
+        turn_state: &Mutex<TurnState>,
+        input: Vec<TurnInput>,
+        start_options: TurnStartOptions,
+    ) {
+        turn_state
+            .lock()
+            .await
+            .pending_input
+            .extend_with_start_options(input, start_options);
     }
 
     pub(crate) async fn take_pending_input_for_turn_state(
         &self,
         turn_state: &Mutex<TurnState>,
     ) -> Vec<TurnInput> {
-        turn_state.lock().await.pending_input.items.split_off(0)
+        turn_state.lock().await.pending_input.take().items
+    }
+
+    pub(crate) async fn take_pending_input_for_turn_start(
+        &self,
+        turn_state: &Mutex<TurnState>,
+        pending_turn_start: &PendingMailboxTurnStart,
+    ) -> (Vec<TurnInput>, TurnStartOptions) {
+        let mut pending_input = turn_state.lock().await.pending_input.take();
+        let mailbox_items = self
+            .drain_mailbox_input_items_for_turn_start(pending_turn_start)
+            .await;
+        pending_input.extend_with_start_options(
+            mailbox_items,
+            pending_turn_start.start_options.clone(),
+        );
+        pending_input.into_parts()
     }
 
     #[expect(
@@ -355,9 +433,9 @@ impl InputQueue {
                     let accepts_mailbox_delivery =
                         turn_state.accepts_mailbox_delivery_for_current_turn();
                     let pending_input = if accepts_mailbox_delivery {
-                        turn_state.pending_input.items.split_off(0)
+                        turn_state.pending_input.take()
                     } else {
-                        Vec::new()
+                        TurnInputQueue::default()
                     };
                     (
                         pending_input,
@@ -365,26 +443,23 @@ impl InputQueue {
                         active_turn_metadata,
                     )
                 }
-                None => (Vec::new(), true, None),
+                None => (TurnInputQueue::default(), true, None),
             }
         };
         if !accepts_mailbox_delivery {
-            return (pending_input, TurnStartOptions::default());
+            return pending_input.into_parts();
         }
-        let (mailbox_items, start_options) = self.drain_mailbox_input_items().await;
+        let (mailbox_items, mailbox_start_options) = self.drain_mailbox_input_items().await;
+        let mut pending_input = pending_input;
+        pending_input.extend_with_start_options(mailbox_items, mailbox_start_options);
+        let (pending_input, start_options) = pending_input.into_parts();
         if let Some(active_turn_metadata) = active_turn_metadata
             && active_turn_metadata.root_turn_id().is_none()
             && let Some(root_turn_id) = start_options.root_turn_id.as_ref()
         {
             active_turn_metadata.set_root_turn_id(root_turn_id.clone());
         }
-        if pending_input.is_empty() {
-            (mailbox_items, start_options)
-        } else {
-            let mut pending_input = pending_input;
-            pending_input.extend(mailbox_items);
-            (pending_input, start_options)
-        }
+        (pending_input, start_options)
     }
 
     #[expect(
@@ -416,6 +491,33 @@ impl InputQueue {
 }
 
 impl TurnInputQueue {
+    fn clear(&mut self) {
+        self.items.clear();
+        self.start_options = PendingTurnStartOptions::default();
+    }
+
+    fn extend(&mut self, input: Vec<TurnInput>) {
+        self.extend_with_start_options(input, TurnStartOptions::default());
+    }
+
+    fn extend_with_start_options(
+        &mut self,
+        input: Vec<TurnInput>,
+        start_options: TurnStartOptions,
+    ) {
+        let later_start_options = PendingTurnStartOptions::from_input(&input, start_options);
+        self.items.extend(input);
+        self.start_options.append(later_start_options);
+    }
+
+    fn take(&mut self) -> Self {
+        std::mem::take(self)
+    }
+
+    fn into_parts(self) -> (Vec<TurnInput>, TurnStartOptions) {
+        (self.items, self.start_options.start_options)
+    }
+
     fn has_pending_input(&self) -> bool {
         self.items.iter().any(|input| {
             matches!(
@@ -743,6 +845,74 @@ mod tests {
             let (_, start_options) = input_queue.drain_mailbox_input_items().await;
             assert_eq!(start_options.cyber_access_program, latest);
         }
+    }
+
+    #[test]
+    fn turn_input_queue_merges_start_options_across_ordered_batches() {
+        use codex_protocol::turn_input::CyberAccessProgram;
+
+        let first = make_mail(AgentPath::root(), AgentPath::root(), "first", true);
+        let passive = make_mail(AgentPath::root(), AgentPath::root(), "passive", false);
+        let second = make_mail(AgentPath::root(), AgentPath::root(), "second", true);
+        let mut pending_input = TurnInputQueue::default();
+        pending_input.extend_with_start_options(
+            vec![TurnInput::InterAgentCommunication(first.clone())],
+            TurnStartOptions {
+                turn_trigger: Some("first".to_owned()),
+                final_output_json_schema: Some(serde_json::json!({"batch": 1})),
+                service_tier: Some("first-tier".to_owned()),
+                parent_turn_id: Some("first-parent".to_owned()),
+                root_turn_id: Some("first-root".to_owned()),
+                cyber_access_program: Some(CyberAccessProgram::DaybreakBlue),
+            },
+        );
+        pending_input.extend_with_start_options(
+            vec![TurnInput::InterAgentCommunication(passive.clone())],
+            TurnStartOptions {
+                turn_trigger: Some("ignored".to_owned()),
+                final_output_json_schema: Some(serde_json::json!({"batch": "ignored"})),
+                service_tier: Some("ignored-tier".to_owned()),
+                parent_turn_id: Some("ignored-parent".to_owned()),
+                root_turn_id: Some("ignored-root".to_owned()),
+                cyber_access_program: Some(CyberAccessProgram::DaybreakRed),
+            },
+        );
+        pending_input.extend_with_start_options(
+            vec![TurnInput::InterAgentCommunication(second.clone())],
+            TurnStartOptions {
+                turn_trigger: Some("second".to_owned()),
+                final_output_json_schema: Some(serde_json::json!({"batch": 2})),
+                service_tier: Some("second-tier".to_owned()),
+                parent_turn_id: Some("second-parent".to_owned()),
+                root_turn_id: Some("second-root".to_owned()),
+                cyber_access_program: Some(CyberAccessProgram::Standard),
+            },
+        );
+
+        let (items, start_options) = pending_input.into_parts();
+        let [
+            TurnInput::InterAgentCommunication(actual_first),
+            TurnInput::InterAgentCommunication(actual_passive),
+            TurnInput::InterAgentCommunication(actual_second),
+        ] = items.as_slice()
+        else {
+            panic!("expected all pending communications in arrival order");
+        };
+        assert_eq!(actual_first, &first);
+        assert_eq!(actual_passive, &passive);
+        assert_eq!(actual_second, &second);
+        assert_eq!(start_options.turn_trigger.as_deref(), Some("second"));
+        assert_eq!(
+            start_options.final_output_json_schema,
+            Some(serde_json::json!({"batch": 2}))
+        );
+        assert_eq!(start_options.service_tier.as_deref(), Some("second-tier"));
+        assert_eq!(start_options.parent_turn_id, None);
+        assert_eq!(start_options.root_turn_id.as_deref(), Some("first-root"));
+        assert_eq!(
+            start_options.cyber_access_program,
+            Some(CyberAccessProgram::Standard)
+        );
     }
 
     #[tokio::test]

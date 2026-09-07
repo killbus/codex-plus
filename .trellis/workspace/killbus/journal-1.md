@@ -26,3 +26,24 @@ CI attempt 2 for run 32225878010 passed all formatting, provenance, Goal baselin
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: Complete Codex 0.153.4 branch validation
+
+**Date**: 2026-09-07
+**Task**: Complete Codex 0.153.4 branch validation
+**Branch**: `upgrade/codex-0.153.4`
+
+### Summary
+
+Completed exact-SHA CI and six-target release validation, independently audited all downloaded artifacts, recorded the first-principles single-commit integration boundary, and archived the stable-upgrade task before constructing the validated integration candidate.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8ba5414` | (see git log) |
+
+### Status
+
+[OK] **Completed**

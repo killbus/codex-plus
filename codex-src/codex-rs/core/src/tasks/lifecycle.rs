@@ -1,3 +1,4 @@
+use codex_extension_api::ThreadIdleCause;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TurnAbortReason;
@@ -45,10 +46,19 @@ impl Session {
         }
     }
 
-    pub(crate) async fn emit_thread_idle_lifecycle_if_idle(&self) {
-        if self.active_turn.lock().await.is_some()
-            || self.input_queue.has_trigger_turn_mailbox_items().await
-        {
+    pub(crate) async fn emit_thread_idle_lifecycle_if_idle(&self, cause: ThreadIdleCause) {
+        let cause = {
+            let active_turn = self.active_turn.lock().await;
+            if active_turn.is_some() {
+                return;
+            }
+            if self.is_interrupted() {
+                ThreadIdleCause::Interrupted
+            } else {
+                cause
+            }
+        };
+        if self.input_queue.has_trigger_turn_mailbox_items().await {
             return;
         }
 
@@ -58,6 +68,7 @@ impl Session {
         for contributor in self.services.extensions.thread_lifecycle_contributors() {
             contributor
                 .on_thread_idle(codex_extension_api::ThreadIdleInput {
+                    cause,
                     completed_turn_id: completed_turn.as_ref().map(|(id, _)| id.as_str()),
                     completed_turn_origin: completed_turn.as_ref().map(|(_, origin)| origin),
                     idle_epoch,

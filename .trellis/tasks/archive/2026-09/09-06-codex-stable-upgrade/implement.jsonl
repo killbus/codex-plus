@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines the executable Goal, Shadow, provenance, release, and remote-only Rust validation contracts."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Required for preserving the typed Shadow item across core, rollout, app-server, schemas, history, and TUI."}
+{"file": ".trellis/spec/guides/cross-platform-thinking-guide.md", "reason": "Required for provenance, symlink, native dependency, and six-target release compatibility."}
+{"file": ".trellis/tasks/09-06-codex-stable-upgrade/research/upstream-audit.md", "reason": "Pins the audited release identity, delta size, patch application behavior, and 25 semantic conflict paths."}
+{"file": ".trellis/tasks/09-06-codex-stable-upgrade/research/agent-goal-dispatch-audit.md", "reason": "Defines the required persisted Goal-before-dispatch ordering and the inline fail-closed fallback when the platform cannot prove it."}

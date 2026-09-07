@@ -33,10 +33,10 @@ use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadSource;
+use codex_protocol::turn_input::TurnInputRequest;
 use codex_protocol::user_input::UserInput;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -783,19 +783,10 @@ async fn run_shadow<S>(
             return Ok::<Option<String>, CodexErr>(None);
         }
         thread
-            .submit_with_trace(
-                Op::UserInput {
-                    items: vec![UserInput::Text {
-                        text: prompt,
-                        text_elements: Vec::new(),
-                    }],
-                    final_output_json_schema: None,
-                    responsesapi_client_metadata: None,
-                    additional_context: Default::default(),
-                    thread_settings: Default::default(),
-                },
-                None,
-            )
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: prompt,
+                text_elements: Vec::new(),
+            }]))
             .await?;
         let timeout_seconds = shadow.timeout_seconds.unwrap_or(120);
         let completion = wait_for_run(

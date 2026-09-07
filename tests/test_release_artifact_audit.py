@@ -17,7 +17,6 @@ SYNTHETIC_COMMIT = "a" * 40
 SYNTHETIC_SOURCE_TREE = "1" * 64
 SYNTHETIC_REBUILT_TREE = "2" * 64
 SYNTHETIC_CARGO_SOURCE = "3" * 64
-SYNTHETIC_CARGO_REBUILT = "4" * 64
 SYNTHETIC_PATCH_HASHES = ("5" * 64, "6" * 64)
 PLATFORMS = {
     "windows-x64": ("codex.exe", "x86_64-pc-windows-msvc"),
@@ -38,17 +37,17 @@ class ReleaseArtifactAuditTest(unittest.TestCase):
     def build_info_from_provenance(
         provenance: dict[str, object],
     ) -> dict[str, str]:
-        changed_files = provenance["changed_files"]
-        assert isinstance(changed_files, dict)
-        cargo_lock = changed_files["codex-rs/Cargo.lock"]
-        assert isinstance(cargo_lock, dict)
+        source_file_sha256 = provenance["source_file_sha256"]
+        assert isinstance(source_file_sha256, dict)
         patch_hashes = provenance["patch_sha256"]
         assert isinstance(patch_hashes, list)
         return {
             "source_commit": str(provenance["commit"]),
             "source_tree_sha256": str(provenance["source_tree_sha256"]),
             "rebuilt_tree_sha256": str(provenance["rebuilt_tree_sha256"]),
-            "cargo_lock_sha256": str(cargo_lock["source"]),
+            "cargo_lock_sha256": str(
+                source_file_sha256["codex-rs/Cargo.lock"]
+            ),
             "patch_sha256": ",".join(str(value) for value in patch_hashes),
         }
 
@@ -58,11 +57,8 @@ class ReleaseArtifactAuditTest(unittest.TestCase):
             "commit": SYNTHETIC_COMMIT,
             "source_tree_sha256": SYNTHETIC_SOURCE_TREE,
             "rebuilt_tree_sha256": SYNTHETIC_REBUILT_TREE,
-            "changed_files": {
-                "codex-rs/Cargo.lock": {
-                    "source": SYNTHETIC_CARGO_SOURCE,
-                    "rebuilt": SYNTHETIC_CARGO_REBUILT,
-                }
+            "source_file_sha256": {
+                "codex-rs/Cargo.lock": SYNTHETIC_CARGO_SOURCE,
             },
             "patch_sha256": list(SYNTHETIC_PATCH_HASHES),
         }
@@ -235,11 +231,8 @@ class ReleaseArtifactAuditTest(unittest.TestCase):
             "cargo_lock_sha256 must be a SHA-256 value": json.dumps(
                 {
                     **self.synthetic_provenance(),
-                    "changed_files": {
-                        "codex-rs/Cargo.lock": {
-                            "source": None,
-                            "rebuilt": SYNTHETIC_CARGO_REBUILT,
-                        }
+                    "source_file_sha256": {
+                        "codex-rs/Cargo.lock": None,
                     },
                 }
             ),

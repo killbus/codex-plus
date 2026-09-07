@@ -62,7 +62,7 @@ jobs:
         run: cargo test --locked -p codex-shadow-extension cancelled_same_epoch_delivery_worker_cannot_drain_replacement_report
 
   retry-contracts:
-    name: Goal and Guardian retry contracts
+    name: Goal retry and upstream regression contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -131,7 +131,9 @@ jobs:
       - name: Generate app-server schema fixtures
         id: generate_app_server_schema
         working-directory: codex-src/codex-rs
-        run: just write-app-server-schema
+        run: |
+          python app-server-protocol/scripts/write_schema_fixtures.py
+          python app-server-protocol/scripts/write_schema_fixtures.py --experimental
 
       - name: Upload generated app-server schemas
         if: always() && steps.generate_app_server_schema.outcome == 'success'
@@ -152,16 +154,9 @@ jobs:
           name: bazel-module-lock
           path: codex-src/MODULE.bazel.lock
 
-      - name: Test goal-only compatibility baseline
-        run: |
-          goal_only="$RUNNER_TEMP/codex-goal-only"
-          commit="$(python -c 'import json; print(json.load(open("docs/provenance.json"))["commit"])')"
-          git init --quiet "$goal_only"
-          git -C "$goal_only" remote add origin https://github.com/openai/codex.git
-          git -C "$goal_only" fetch --quiet --depth=1 --filter=blob:none origin "$commit"
-          git -C "$goal_only" checkout --quiet --detach FETCH_HEAD
-          git -C "$goal_only" apply "$GITHUB_WORKSPACE/patches/goal-old-continuation.patch"
-          cargo test --manifest-path "$goal_only/codex-rs/Cargo.toml" -p codex-goal-extension turn_error_
+      - name: Test integrated Goal continuation policy
+        working-directory: codex-src/codex-rs
+        run: cargo test --locked -p codex-goal-extension turn_error_
 
       - name: Check Shadow extension
         working-directory: codex-src/codex-rs

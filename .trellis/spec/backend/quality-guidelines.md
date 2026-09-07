@@ -77,6 +77,9 @@ the checked-out provenance document. It must not duplicate those values as
 Python constants: the build jobs write `BUILD-INFO.txt` from the same versioned
 document, and a second manually synchronized list can silently retain a removed
 patch until the final release audit.
+Release-relevant source files are recorded independently under
+`source_file_sha256`; this keeps an unchanged `codex-rs/Cargo.lock` auditable
+without misclassifying it as a materialization difference.
 
 ### 4. Validation & Error Matrix
 
@@ -104,7 +107,7 @@ patch until the final release audit.
   or hard-coded provenance values.
 - Artifact `BUILD-INFO.txt` differs from the current provenance document -> fail
   on the exact field; preserve `patch_sha256` list order and use the source-side
-  Cargo.lock digest recorded under `changed_files`.
+  Cargo.lock digest recorded under `source_file_sha256`.
 - Missing distribution overrides -> the intentionally symbol-bearing Cargo
   intermediate may be archived directly; fail the workflow contract review and
   restore the scoped overrides rather than inventing a size threshold.
@@ -209,6 +212,14 @@ every other terminal `CodexErrorInfo` leaves the Goal Active for idle
 continuation. Shadow applies directly after that patch and must not add a Goal
 error classifier or consecutive-failure counter.
 
+When an upstream release changes `workspace.package.version`, every source-less
+local workspace package entry in the imported `Cargo.lock` must record that same
+version. A lockfile copied from a release commit may still contain placeholder
+`0.0.0` versions; provenance can reproduce those bytes while `cargo --locked`
+correctly rejects them. Reconcile only package identity/version metadata proven
+to belong to local manifests, then regenerate the following integration patch
+and provenance from that accepted tree.
+
 ### 4. Validation & Error Matrix
 
 - `UsageLimitExceeded` -> inherited usage-limit state; no automatic next turn.
@@ -222,6 +233,9 @@ error classifier or consecutive-failure counter.
   `dead_code`.
 - Patch application, hash, or reconstructed manifest mismatch -> deterministic
   provenance failure; do not retry it as a network error.
+- Source-less local lock packages disagree with `workspace.package.version` ->
+  `cargo --locked` fails before behavioral tests; update all and only the proven
+  local package versions, then rebuild patch and provenance evidence.
 - Upstream fetch disconnect/429/5xx -> retry only the fetch boundary.
 
 ### 5. Good/Base/Bad Cases
@@ -243,6 +257,8 @@ error classifier or consecutive-failure counter.
 - Enable both Goals and Shadow in that integration test.
 - CI and release provenance commands use exactly the two ordered patches.
 - Verify the immutable Goal patch hash and reject any residual classifier/counter.
+- Parse `Cargo.lock` and local manifests to prove every source-less package maps
+  to a workspace package and uses the inherited workspace release version.
 - Statically assert that the integrated Goal runtime has no unreachable
   `TurnError` stop reason while `on_turn_error` still special-cases only
   `UsageLimitExceeded`.
@@ -256,6 +272,12 @@ circuit breaker.
 Correct: keep the imported Goal patch byte-for-byte unchanged, layer Shadow
 directly on it, and use behavior tests plus ordered provenance to prove both the
 policy and its reconstruction.
+
+Wrong: assume a reproducible imported `Cargo.lock` is usable with `--locked`
+without checking local package versions after a workspace release-version bump.
+
+Correct: prove the source-less entries correspond to local manifests, synchronize
+their inherited version only, and regenerate the downstream patch and hashes.
 
 ## Scenario: Native Shadow report delivery
 
@@ -290,6 +312,33 @@ reported at the next idle edge, Shadow skips heartbeat scheduling. User turns,
 Goal continuations, and other extension origins retain their existing eligibility.
 Completed Shadow report items persist in both legacy and paginated history and
 map to the same app-server/TUI identity, content, and order on replay.
+Whenever a public history enum gains a variant, search every exhaustive match in
+all consumers before accepting the change. Each consumer must make an explicit
+semantic choice: preserve and map the item, intentionally ignore it, or reject
+it. A wildcard arm is not a substitute for reviewing the new variant.
+
+Pending-work startup must use one immutable mailbox observation for both context
+construction and final ownership transfer. `PendingMailboxTurnStart` records the
+observed mailbox prefix length together with its trigger flag, initiating agent
+path, and `TurnStartOptions`. After the pending-work reservation is revalidated,
+installation drains exactly that observed prefix and applies the same metadata.
+Messages that arrive after the observation remain queued for normal active-turn
+delivery or a later turn; they must not be attached to context built from the
+older snapshot.
+
+When mailbox input moves into an active turn's pending queue, its aggregated
+`TurnStartOptions` moves with the input as one ownership unit. Clearing or taking
+that queue clears or takes both parts. If later mailbox input is appended, merge
+metadata in arrival order using the mailbox rules: the latest triggering batch
+wins ordinary options, the first triggering batch supplies the root, parent
+lineage survives only when every triggering batch agrees on the same non-empty
+parent, and queue-only mail does not override triggering metadata.
+
+When this ownership token crosses from `session` into a sibling module such as
+`tasks`, expose the token through the crate-visible `session` facade. A sibling
+module must not name the private `session::input_queue` implementation module.
+The narrow re-export preserves encapsulation while allowing the compiler to
+validate the cross-module ownership handoff.
 
 ### 4. Validation & Error Matrix
 
@@ -299,6 +348,12 @@ map to the same app-server/TUI identity, content, and order on replay.
 - User, Goal, unspecified, or non-Shadow extension origin -> normal eligibility.
 - Stale epoch, busy/Plan state, or pending trigger work -> no display item and no
   automatic turn.
+- Pending-work context construction fails -> clear only the still-owned
+  reservation and leave the observed mailbox prefix queued.
+- A user turn replaces a pending-work reservation -> leave the observed mailbox
+  items and all associated start options queued for that user-owned lifecycle.
+- Mail arrives after pending-work observation but before installation -> drain
+  only the observed prefix; keep the late arrival queued.
 - Cancel, timeout, user input, or thread stop before delivery -> clear undelivered
   reports and emit nothing.
 - Oversized or multibyte report -> truncate once at a valid UTF-8 byte boundary;
@@ -308,7 +363,7 @@ map to the same app-server/TUI identity, content, and order on replay.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: TUI shows `Shadow · Reviewer` and the accepted report, then the main
+- Good: TUI shows `Shadow - Reviewer` and the accepted report, then the main
   Agent replies; replay shows the same report in the same relative position.
 - Base: a Goal automatic continuation remains eligible for Shadow scheduling.
 - Bad: parse `[shadow:reviewer]` to determine origin, render the report as a user
@@ -321,10 +376,19 @@ map to the same app-server/TUI identity, content, and order on replay.
   app-server boundary with all four payload fields.
 - Core tests assert accepted display/model ordering and prove stale, busy, Plan,
   and pending-work rejection emits no display lifecycle.
+- Input-queue and session regressions assert that pending-work startup applies one
+  observed mailbox snapshot, drains only its exact prefix, preserves late
+  arrivals, preserves every queued `TurnStartOptions` field when ownership is
+  replaced, and applies the same ordered merge rules after mailbox input has
+  crossed into active-turn storage.
 - Shadow tests assert one-time report draining, UTF-8-safe size limits,
   cancellation cleanup, Shadow-only origin suppression, and Goal/user eligibility.
 - Rollout and thread-history tests assert legacy/paginated persistence and replay
   order; TUI snapshots assert live/replay identity, wrapping, and raw transcript.
+- Source review enumerates every exhaustive `ThreadItem` consumer. Focused tests
+  cover consumers that preserve the item, while intentionally non-applicable
+  consumers include an explicit no-op arm with a reason grounded in their output
+  contract.
 - GitHub Actions runs the affected package tests, schema generation/drift check,
   clippy/type-check, Goal patch hash, and ordered provenance verification.
 
@@ -336,6 +400,104 @@ feedback suppression by parsing that model-visible text.
 Correct: pair a typed display-only item with the bounded model input inside the
 accepted idle turn, attach trusted runtime origin metadata, and suppress only
 `Extension("shadow")` at the following idle edge.
+
+Wrong: peek mailbox metadata to construct a pending-work context, then drain the
+entire mailbox during installation. A late arrival would inherit context and
+metadata that were computed before it existed.
+
+Correct: carry the observed `PendingMailboxTurnStart` through reservation
+validation and drain only its recorded prefix during the final ownership
+transfer.
+
+Wrong: make a sibling module refer directly to
+`session::input_queue::PendingMailboxTurnStart` while `input_queue` remains
+private; every focused runtime test then fails at compilation before exercising
+its contract.
+
+Correct: re-export only `PendingMailboxTurnStart` as `pub(crate)` from
+`session`, and have sibling modules use that facade path.
+
+Wrong: add `ThreadItem::ShadowReport` to the public protocol and update only the
+primary renderer, leaving secondary summary or marker consumers to fail later at
+remote compilation.
+
+Correct: enumerate every exhaustive `ThreadItem` match when the variant is added;
+map Shadow reports into typed summaries and explicitly ignore them only where the
+consumer's contract does not apply, such as selecting the latest tool marker.
+
+## Scenario: Atomic integration history for baseline upgrades
+
+### 1. Scope / Trigger
+
+Apply this contract when one task replaces an imported upstream baseline and
+ports the repository's existing fork responsibilities onto it. The development
+branch may need multiple reviewable checkpoints, but those checkpoints do not
+define separate product changes.
+
+### 2. Signatures
+
+- Integration range: `<pre-upgrade-base>..<accepted-upgrade-tip>`.
+- Final commit count: `git rev-list --count <pre-upgrade-base>..main` must report
+  exactly `1` for the upgrade range.
+- Final subject: the task-approved first-principles description, for example
+  `feat: upgrade Codex baseline to 0.153.4`.
+- Exact-SHA validation: CI and release evidence must identify the resulting
+  integration commit, not an earlier checkpoint SHA.
+
+### 3. Contracts
+
+Checkpoint, audit, and corrective `fix:` commits may remain on the upgrade
+branch because they record how the accepted tree was developed and reviewed.
+Before integration, combine the entire accepted range into one commit whose
+tree is byte-identical to the accepted upgrade tip. Do not independently carry
+upgrade-local checkpoints, generated-file corrections, audit updates, or CI
+fixes into `main`.
+
+The single integration commit represents the product boundary: complete new
+upstream baseline plus the repository's existing fork responsibilities and
+required compatibility glue. Its message describes that whole outcome rather
+than the chronological repairs used to reach it. Any pre-integration correction
+is folded into the same commit. If the commit SHA changes, all exact-SHA CI and
+release evidence must be regenerated.
+
+### 4. Validation & Error Matrix
+
+- More than one upgrade-range commit on `main` -> integration-history failure.
+- Final tree differs from the accepted upgrade tip -> squash/reconstruction
+  failure.
+- Final subject differs from the task-approved subject -> commit-contract
+  failure.
+- CI or release evidence points to a checkpoint or superseded SHA -> evidence
+  failure; rerun validation on the final commit.
+- A failure is found before integration -> correct it on the upgrade branch and
+  include it in the final squash, without creating another product boundary.
+
+### 5. Good/Base/Bad Cases
+
+- Good: twelve checkpoint and corrective commits remain on the upgrade branch;
+  `main` receives one tree-equivalent `feat:` commit and validates that exact SHA.
+- Base: a documentation-only audit correction is committed on the upgrade branch
+  and becomes part of the same final integration commit.
+- Bad: merge the `feat:` checkpoint and then append several upgrade-local `fix:`
+  commits to `main`, even though all of them belong to the same baseline upgrade.
+
+### 6. Tests Required
+
+- Assert the final integration tree equals the accepted upgrade-tip tree.
+- Assert the upgrade range on `main` contains exactly one commit.
+- Assert that commit has the approved subject.
+- Run the complete CI and release/artifact gates on that exact commit SHA.
+- Recheck rollback ancestry so the single commit can be reverted to the recorded
+  pre-upgrade base without depending on an intermediate checkpoint.
+
+### 7. Wrong vs Correct
+
+Wrong: treat every CI-discovered correction as a separate product change and
+preserve the upgrade branch's chronological `fix:` history in `main`.
+
+Correct: preserve that history on the upgrade branch for review, then integrate
+the accepted tree as one first-principles baseline-upgrade commit and validate
+the resulting exact SHA.
 
 ## Forbidden Patterns
 
@@ -356,6 +518,8 @@ accepted idle turn, attach trusted runtime origin metadata, and suppress only
   the reviewed imported contract until the user approves a separate change.
 - Do not modify the imported Goal patch or weaken clippy to hide dead code left
   unreachable by that patch; clean it up in the following integration patch.
+- Do not carry baseline-upgrade checkpoint or corrective commits into `main` as
+  independent product changes when they belong to one approved upgrade boundary.
 
 ## Required Patterns
 
@@ -374,6 +538,8 @@ accepted idle turn, attach trusted runtime origin metadata, and suppress only
   channel.
 - Keep the Goal patch hash, ordered two-patch chain, vendored source, workflows,
   and provenance manifest synchronized.
+- Keep baseline-upgrade development history on its branch and integrate the
+  accepted tree into `main` as the single task-approved commit.
 
 ## Testing Requirements
 
@@ -393,3 +559,5 @@ platform artifact passes the allowlist and checksum audit.
 - [ ] No unrequested distribution context or platform claim was added.
 - [ ] Goal behavior matches the immutable imported patch, with no hidden narrowing
   patch or consecutive-failure breaker.
+- [ ] A baseline upgrade enters `main` as one tree-equivalent commit, and CI plus
+  release evidence identify that exact commit SHA.

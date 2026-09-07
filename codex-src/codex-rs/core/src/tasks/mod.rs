@@ -273,7 +273,7 @@ enum TaskStartOwnership {
     Available,
     PendingWorkReservation {
         turn_state: Arc<tokio::sync::Mutex<TurnState>>,
-        pending_turn_start: crate::session::PendingMailboxTurnStart,
+        pending_turn_start: Box<crate::session::PendingMailboxTurnStart>,
     },
     IdleReservation(Arc<tokio::sync::Mutex<TurnState>>),
 }
@@ -470,7 +470,10 @@ impl Session {
                     )
                 } else {
                     self.input_queue
-                        .take_pending_input_for_turn_start(turn_state.as_ref(), pending_turn_start)
+                        .take_pending_input_for_turn_start(
+                            turn_state.as_ref(),
+                            pending_turn_start.as_ref(),
+                        )
                         .await
                 }
             }
@@ -757,7 +760,7 @@ impl Session {
                 RegularTask::new(),
                 TaskStartOwnership::PendingWorkReservation {
                     turn_state,
-                    pending_turn_start,
+                    pending_turn_start: Box::new(pending_turn_start),
                 },
             )
             .await;

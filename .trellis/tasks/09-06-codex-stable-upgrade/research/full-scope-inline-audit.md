@@ -503,6 +503,30 @@ and rebuilt tree hash
 A new exact-SHA CI run remains required; run `34085782538` is not a green CI
 result and must not be represented as one.
 
+GitHub Actions run `34089015125` then tested branch commit
+`eb19e98d7c6ed94f2c09e6b071ed6bff3891a36c`. Shadow runtime, Goal retry and
+shared-upstream regression contracts, formatting, provenance reconstruction,
+schema generation and drift, Bazel lock generation and drift, affected package
+checks and tests, Goal lifecycle, and TUI integration all passed. The sole
+failure was affected-crate Clippy with `-D warnings`: `TaskStartOwnership`
+stored the 224-byte `PendingMailboxTurnStart` snapshot inline, triggering
+`clippy::large_enum_variant`.
+
+The corrective delta boxes only that enum field, boxes the snapshot at
+reservation construction, and borrows it at mailbox consumption. This preserves
+the same immutable snapshot, reservation ownership, and mailbox-prefix behavior;
+it changes storage representation only and does not suppress the lint. The
+correction is identical in `codex-src` and the integration staging tree. The
+Shadow patch was regenerated from the complete staging diff and now has SHA-256
+`9f3ec340a950cffeed509ce1398bca64d938134eee561279629c285c3f3d52ce`.
+The immutable Goal patch remains
+`eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6`.
+Exact two-patch reconstruction now records source tree hash
+`962b4c0e74b3d6420a76346c255c19af22b30e81052b768028d0c842ae0603d1`
+and rebuilt tree hash
+`2bb966c5ad5649cfae4ca42c9851b30e69d976310bdc3c98256bfc6d1457276e`.
+A replacement exact-SHA CI run is required before the branch can be accepted.
+
 GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
 with `-D warnings`, app-server schema generation/drift, Bazel lock generation/
 drift, and the six-target CLI release. The configured targets are Windows x64,

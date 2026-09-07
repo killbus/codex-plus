@@ -469,12 +469,8 @@ impl Session {
                         codex_protocol::turn_input::TurnStartOptions::default(),
                     )
                 } else {
-                    self
-                        .input_queue
-                        .take_pending_input_for_turn_start(
-                            turn_state.as_ref(),
-                            pending_turn_start,
-                        )
+                    self.input_queue
+                        .take_pending_input_for_turn_start(turn_state.as_ref(), pending_turn_start)
                         .await
                 }
             }

@@ -406,10 +406,8 @@ impl InputQueue {
         let mailbox_items = self
             .drain_mailbox_input_items_for_turn_start(pending_turn_start)
             .await;
-        pending_input.extend_with_start_options(
-            mailbox_items,
-            pending_turn_start.start_options.clone(),
-        );
+        pending_input
+            .extend_with_start_options(mailbox_items, pending_turn_start.start_options.clone());
         pending_input.into_parts()
     }
 

@@ -9406,7 +9406,7 @@ index 6c103f266c..b5cc916bce 100644
      #[expect(
          clippy::await_holding_invalid_type,
 diff --git a/codex-rs/core/src/session/input_queue.rs b/codex-rs/core/src/session/input_queue.rs
-index e6bd3ba388..ef0dd56ad6 100644
+index e6bd3ba388..05f975256c 100644
 --- a/codex-rs/core/src/session/input_queue.rs
 +++ b/codex-rs/core/src/session/input_queue.rs
 @@ -4,6 +4,8 @@ use crate::state::TurnState;
@@ -9601,7 +9601,7 @@ index e6bd3ba388..ef0dd56ad6 100644
              turn_state.accept_mailbox_delivery_for_current_turn();
          }
          self.activity_tx.send_replace(InputQueueActivity::Steer);
-@@ -272,14 +374,43 @@ impl InputQueue {
+@@ -272,14 +374,41 @@ impl InputQueue {
          turn_state: &Mutex<TurnState>,
          input: Vec<TurnInput>,
      ) {
@@ -9639,15 +9639,13 @@ index e6bd3ba388..ef0dd56ad6 100644
 +        let mailbox_items = self
 +            .drain_mailbox_input_items_for_turn_start(pending_turn_start)
 +            .await;
-+        pending_input.extend_with_start_options(
-+            mailbox_items,
-+            pending_turn_start.start_options.clone(),
-+        );
++        pending_input
++            .extend_with_start_options(mailbox_items, pending_turn_start.start_options.clone());
 +        pending_input.into_parts()
      }
  
      #[expect(
-@@ -302,9 +433,9 @@ impl InputQueue {
+@@ -302,9 +431,9 @@ impl InputQueue {
                      let accepts_mailbox_delivery =
                          turn_state.accepts_mailbox_delivery_for_current_turn();
                      let pending_input = if accepts_mailbox_delivery {
@@ -9659,7 +9657,7 @@ index e6bd3ba388..ef0dd56ad6 100644
                      };
                      (
                          pending_input,
-@@ -312,26 +443,23 @@ impl InputQueue {
+@@ -312,26 +441,23 @@ impl InputQueue {
                          active_turn_metadata,
                      )
                  }
@@ -9693,7 +9691,7 @@ index e6bd3ba388..ef0dd56ad6 100644
      }
  
      #[expect(
-@@ -363,6 +491,33 @@ impl InputQueue {
+@@ -363,6 +489,33 @@ impl InputQueue {
  }
  
  impl TurnInputQueue {
@@ -9727,7 +9725,7 @@ index e6bd3ba388..ef0dd56ad6 100644
      fn has_pending_input(&self) -> bool {
          self.items.iter().any(|input| {
              matches!(
-@@ -388,7 +543,11 @@ mod tests {
+@@ -388,7 +541,11 @@ mod tests {
          let value = serde_json::json!({"ResponseItem": item});
  
          assert_eq!(serde_json::to_value(&input).unwrap(), value);
@@ -9740,7 +9738,7 @@ index e6bd3ba388..ef0dd56ad6 100644
  
          let annotated = TurnInput::ResponseItem(ResponseItemEnvelope {
              item: ResponseItem::Other,
-@@ -543,14 +702,76 @@ mod tests {
+@@ -543,14 +700,76 @@ mod tests {
              .enqueue_mailbox_communication(mail_two.clone(), Default::default())
              .await;
  
@@ -9823,7 +9821,7 @@ index e6bd3ba388..ef0dd56ad6 100644
      }
  
      #[tokio::test]
-@@ -626,6 +847,74 @@ mod tests {
+@@ -626,6 +845,74 @@ mod tests {
          }
      }
  
@@ -11679,7 +11677,7 @@ index cde3fc7d72..c44181f938 100644
              contributor
                  .on_turn_abort(codex_extension_api::TurnAbortInput {
 diff --git a/codex-rs/core/src/tasks/mod.rs b/codex-rs/core/src/tasks/mod.rs
-index 5bf41019d5..981e603804 100644
+index 5bf41019d5..0f7dcc35e6 100644
 --- a/codex-rs/core/src/tasks/mod.rs
 +++ b/codex-rs/core/src/tasks/mod.rs
 @@ -9,6 +9,7 @@ use std::time::Duration;
@@ -11812,7 +11810,7 @@ index 5bf41019d5..981e603804 100644
      pub async fn spawn_task<T: SessionTask>(
          self: &Arc<Self>,
          turn_context: Arc<TurnContext>,
-@@ -285,9 +393,131 @@ impl Session {
+@@ -285,9 +393,127 @@ impl Session {
          input: Vec<TurnInput>,
          task: T,
      ) {
@@ -11892,12 +11890,8 @@ index 5bf41019d5..981e603804 100644
 +                        codex_protocol::turn_input::TurnStartOptions::default(),
 +                    )
 +                } else {
-+                    self
-+                        .input_queue
-+                        .take_pending_input_for_turn_start(
-+                            turn_state.as_ref(),
-+                            pending_turn_start,
-+                        )
++                    self.input_queue
++                        .take_pending_input_for_turn_start(turn_state.as_ref(), pending_turn_start)
 +                        .await
 +                }
 +            }
@@ -11944,7 +11938,7 @@ index 5bf41019d5..981e603804 100644
          let started_at = Instant::now();
          let turn_started_at_unix_ms = turn_context
              .turn_timing_state
-@@ -306,31 +536,31 @@ impl Session {
+@@ -306,31 +532,31 @@ impl Session {
              .lock()
              .await
              .clear_turn(&turn_context.sub_id);
@@ -11990,7 +11984,7 @@ index 5bf41019d5..981e603804 100644
          let agent_execution_guard = self.services.agent_control.execution_guard(
              turn_context.multi_agent_version,
              &turn_context.session_source,
-@@ -409,6 +639,8 @@ impl Session {
+@@ -409,6 +635,8 @@ impl Session {
              _timer: timer,
          };
          turn.task = Some(running_task);
@@ -11999,7 +11993,7 @@ index 5bf41019d5..981e603804 100644
      }
  
      /// Returns whether an extension has marked this thread as durably asleep.
-@@ -456,42 +688,62 @@ impl Session {
+@@ -456,42 +684,62 @@ impl Session {
              if active_turn.is_some() {
                  return;
              }
@@ -12081,7 +12075,7 @@ index 5bf41019d5..981e603804 100644
              }
              turn_context.turn_metadata_state.set_parent_turn_id(id);
          }
-@@ -500,11 +752,18 @@ impl Session {
+@@ -500,11 +748,18 @@ impl Session {
          }
          self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
              .await;
@@ -12105,7 +12099,7 @@ index 5bf41019d5..981e603804 100644
              .await;
      }
  
-@@ -526,7 +785,7 @@ impl Session {
+@@ -526,7 +781,7 @@ impl Session {
          }
  
          if let Some(turn_context) = turn_context.as_deref() {
@@ -12114,7 +12108,7 @@ index 5bf41019d5..981e603804 100644
                  .await;
          }
          if let Some(active_turn) = active_turn_to_clear {
-@@ -573,7 +832,7 @@ impl Session {
+@@ -573,7 +828,7 @@ impl Session {
                  .await;
          }
          if let Some(turn_context) = turn_context.as_deref() {
@@ -12123,7 +12117,7 @@ index 5bf41019d5..981e603804 100644
                  .await;
          }
          // Let interrupted tasks observe cancellation before dropping pending approvals, or an
-@@ -808,7 +1067,7 @@ impl Session {
+@@ -808,7 +1063,7 @@ impl Session {
              if reason == TurnAbortReason::Interrupted {
                  run_turn_interrupt_hooks(self, &turn_context, &turn_state).await;
              }
@@ -12132,7 +12126,7 @@ index 5bf41019d5..981e603804 100644
                  .await;
              EventMsg::TurnAborted(TurnAbortedEvent {
                  turn_id: Some(turn_context.sub_id.clone()),
-@@ -823,8 +1082,7 @@ impl Session {
+@@ -823,8 +1078,7 @@ impl Session {
                  .time_to_first_token_ms()
                  .await;
              let error = turn_context.terminal_error.lock().await.clone();

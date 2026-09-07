@@ -160,13 +160,13 @@ peeled source commit. Reconstruction uses this ordered chain:
    applied with deterministic three-way semantics using preimage commit
    `bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb`.
 2. `patches/shadow-mind.patch`, SHA-256
-   `911efddd6382aae54c670750864a363a2771d52398da5a3682a838faf5251af7`,
+   `fd4c789e3746940821c2826c0b492d112f96244141fc50d9d8118111f425d66b`,
    applied directly.
 
 The source tree digest is
-`af2edfc2de18be6d9cdc35c0d532648deb82813b20fd3f526c16e61b5fa813eb`;
+`6699400419f965b4fc8ad576621a3246c3ebc7945f06ffe0a715cc3e4ea90084`;
 the rebuilt digest is
-`c519864f1abcbc133b9d4a91bf2c60479b8f736810134e28cc640bc49cdb1028`.
+`e144ffd40eb7fcb52bb6cb1565020843644d36686383faf1f19f690a0474b8f6`.
 The only expected materialization differences are the three recorded `.vscode`
 files. The source-side Cargo lock digest is recorded independently under
 `source_file_sha256` as
@@ -450,6 +450,16 @@ a tool marker, but it is durable turn content that summaries must preserve.
   transcript projection, status feeds, summaries, and marker selection. The
   remaining matches are partial selectors, wildcard-based projections, or
   single-variant destructuring/tests rather than unreviewed exhaustive consumers.
+
+GitHub Actions run `34083243977` tested branch commit
+`81915ce7f637bde5311984b79ad669718280f047` on 2026-09-07. Its Rust,
+Goal/retry, and Shadow-runtime jobs all reported the same rustfmt-only failure.
+The formatter requested two line-wrapping changes in
+`core/src/session/input_queue.rs` and `core/src/tasks/mod.rs`; no semantic
+change was requested. Those exact mechanical edits were applied to both the
+vendored source and integration staging tree before regenerating the Shadow
+patch and provenance. The replacement run remains required for all compiled
+behavior and completion evidence.
 
 GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
 with `-D warnings`, app-server schema generation/drift, Bazel lock generation/

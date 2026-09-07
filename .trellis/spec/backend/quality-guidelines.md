@@ -425,6 +425,80 @@ Correct: enumerate every exhaustive `ThreadItem` match when the variant is added
 map Shadow reports into typed summaries and explicitly ignore them only where the
 consumer's contract does not apply, such as selecting the latest tool marker.
 
+## Scenario: Atomic integration history for baseline upgrades
+
+### 1. Scope / Trigger
+
+Apply this contract when one task replaces an imported upstream baseline and
+ports the repository's existing fork responsibilities onto it. The development
+branch may need multiple reviewable checkpoints, but those checkpoints do not
+define separate product changes.
+
+### 2. Signatures
+
+- Integration range: `<pre-upgrade-base>..<accepted-upgrade-tip>`.
+- Final commit count: `git rev-list --count <pre-upgrade-base>..main` must report
+  exactly `1` for the upgrade range.
+- Final subject: the task-approved first-principles description, for example
+  `feat: upgrade Codex baseline to 0.153.4`.
+- Exact-SHA validation: CI and release evidence must identify the resulting
+  integration commit, not an earlier checkpoint SHA.
+
+### 3. Contracts
+
+Checkpoint, audit, and corrective `fix:` commits may remain on the upgrade
+branch because they record how the accepted tree was developed and reviewed.
+Before integration, combine the entire accepted range into one commit whose
+tree is byte-identical to the accepted upgrade tip. Do not independently carry
+upgrade-local checkpoints, generated-file corrections, audit updates, or CI
+fixes into `main`.
+
+The single integration commit represents the product boundary: complete new
+upstream baseline plus the repository's existing fork responsibilities and
+required compatibility glue. Its message describes that whole outcome rather
+than the chronological repairs used to reach it. Any pre-integration correction
+is folded into the same commit. If the commit SHA changes, all exact-SHA CI and
+release evidence must be regenerated.
+
+### 4. Validation & Error Matrix
+
+- More than one upgrade-range commit on `main` -> integration-history failure.
+- Final tree differs from the accepted upgrade tip -> squash/reconstruction
+  failure.
+- Final subject differs from the task-approved subject -> commit-contract
+  failure.
+- CI or release evidence points to a checkpoint or superseded SHA -> evidence
+  failure; rerun validation on the final commit.
+- A failure is found before integration -> correct it on the upgrade branch and
+  include it in the final squash, without creating another product boundary.
+
+### 5. Good/Base/Bad Cases
+
+- Good: twelve checkpoint and corrective commits remain on the upgrade branch;
+  `main` receives one tree-equivalent `feat:` commit and validates that exact SHA.
+- Base: a documentation-only audit correction is committed on the upgrade branch
+  and becomes part of the same final integration commit.
+- Bad: merge the `feat:` checkpoint and then append several upgrade-local `fix:`
+  commits to `main`, even though all of them belong to the same baseline upgrade.
+
+### 6. Tests Required
+
+- Assert the final integration tree equals the accepted upgrade-tip tree.
+- Assert the upgrade range on `main` contains exactly one commit.
+- Assert that commit has the approved subject.
+- Run the complete CI and release/artifact gates on that exact commit SHA.
+- Recheck rollback ancestry so the single commit can be reverted to the recorded
+  pre-upgrade base without depending on an intermediate checkpoint.
+
+### 7. Wrong vs Correct
+
+Wrong: treat every CI-discovered correction as a separate product change and
+preserve the upgrade branch's chronological `fix:` history in `main`.
+
+Correct: preserve that history on the upgrade branch for review, then integrate
+the accepted tree as one first-principles baseline-upgrade commit and validate
+the resulting exact SHA.
+
 ## Forbidden Patterns
 
 - Do not run Rust compilation locally when the task requires GitHub Actions.
@@ -444,6 +518,8 @@ consumer's contract does not apply, such as selecting the latest tool marker.
   the reviewed imported contract until the user approves a separate change.
 - Do not modify the imported Goal patch or weaken clippy to hide dead code left
   unreachable by that patch; clean it up in the following integration patch.
+- Do not carry baseline-upgrade checkpoint or corrective commits into `main` as
+  independent product changes when they belong to one approved upgrade boundary.
 
 ## Required Patterns
 
@@ -462,6 +538,8 @@ consumer's contract does not apply, such as selecting the latest tool marker.
   channel.
 - Keep the Goal patch hash, ordered two-patch chain, vendored source, workflows,
   and provenance manifest synchronized.
+- Keep baseline-upgrade development history on its branch and integrate the
+  accepted tree into `main` as the single task-approved commit.
 
 ## Testing Requirements
 
@@ -481,3 +559,5 @@ platform artifact passes the allowlist and checksum audit.
 - [ ] No unrequested distribution context or platform claim was added.
 - [ ] Goal behavior matches the immutable imported patch, with no hidden narrowing
   patch or consecutive-failure breaker.
+- [ ] A baseline upgrade enters `main` as one tree-equivalent commit, and CI plus
+  release evidence identify that exact commit SHA.

@@ -25,7 +25,8 @@ Current integration state:
 - Pre-upgrade rollback commit: `632cc5b11a7a071bf5a3d45ccecfefa9a56ebcf5`.
 - Staging tree: `.trellis/.runtime/upgrade-staging`.
 - Staging base HEAD: `5352fbd14d09926a5217353f08a93c756c87c52a`.
-- Staged integration delta: 87 files, 5,933 insertions, and 320 deletions.
+- Staged integration delta: 88 paths. The staging index contains the complete
+  final integration delta and has no unstaged correction layered on top of it.
 - Ordered patches: immutable Goal patch followed directly by the regenerated
   Shadow integration patch.
 
@@ -160,13 +161,13 @@ peeled source commit. Reconstruction uses this ordered chain:
    applied with deterministic three-way semantics using preimage commit
    `bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb`.
 2. `patches/shadow-mind.patch`, SHA-256
-   `d5723f568621bff708a05e453c50afdab0d59ba14b3e18fada9c7ff8ba78bd96`,
+   `0a18b78fb6facc930ab70eb5e593633b23438c2a27a7c2a4737fc5c376151960`,
    applied directly.
 
 The source tree digest is
-`03e456e8661fb38e4034a4caf4b63c7d1a7b2a37fae14b3987b3c522d26d9ac1`;
+`6fba68d5b068e348a76f67a6cd18105af81809487501067db4727147aec5ac55`;
 the rebuilt digest is
-`b59ba57ac70a37aa5ccd335f130717e5de8c3ceb9ae95eb4483fd6e33748da8e`.
+`6401db674bd8f27a75a8855524dbb95d1700964805afcab8dac6ab7c2c2ecbe1`.
 The only expected materialization differences are the three recorded `.vscode`
 files. The source-side Cargo lock digest is recorded independently under
 `source_file_sha256` as
@@ -549,15 +550,38 @@ Exact two-patch reconstruction now records source tree hash
 `6fba68d5b068e348a76f67a6cd18105af81809487501067db4727147aec5ac55`
 and rebuilt tree hash
 `6401db674bd8f27a75a8855524dbb95d1700964805afcab8dac6ab7c2c2ecbe1`.
-A replacement exact-SHA CI run remains required before branch acceptance.
+At that checkpoint, a replacement exact-SHA CI run was still required before
+branch acceptance; the following paragraph records its completed result.
 
-GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
-with `-D warnings`, app-server schema generation/drift, Bazel lock generation/
-drift, and the six-target CLI release. The configured targets are Windows x64,
-Windows arm64, macOS x64, macOS arm64, Linux musl x64, and Linux musl arm64. The
-release audit must verify archive allowlists, binary and ZIP hashes, BUILD-INFO,
-toolchain/target identity, and provenance. These remote results are pending and
-must not be inferred from the local checks.
+GitHub Actions run `34097162982` tested exact branch commit
+`87dc5b3d695c4329a478836b71fc2b8e40c6bfe9` on 2026-09-07 and completed
+successfully. All three jobs passed: `Shadow runtime contracts`, `Goal retry and
+upstream regression contracts`, and `Rust checks`. This proves the compiled
+branch tree passes formatting, exact provenance reconstruction, schema and Bazel
+generation/drift, affected package checks and tests, Goal continuation, Shadow
+runtime/public contracts, TUI/app-server integration, rollout persistence, and
+affected-crate Clippy with `-D warnings`. Guardian-labelled cases remain
+shared-upstream non-regression coverage for the touched retry/error boundary,
+not a separately migrated fork capability.
+
+GitHub Actions release run `34100946905` built Windows x64, Windows arm64,
+macOS x64, macOS arm64, Linux musl x64, and Linux musl arm64 at exact branch
+commit `87dc5b3d695c4329a478836b71fc2b8e40c6bfe9` on 2026-09-07. All six
+native build jobs and the workflow's aggregate `Audit downloaded release
+artifacts` job completed successfully.
+
+The main session then downloaded all six artifacts into a fresh local directory
+and independently ran:
+
+```text
+python3 scripts/audit_release_artifacts.py <download-root> \
+  --repository-commit 87dc5b3d695c4329a478836b71fc2b8e40c6bfe9
+```
+
+The audit reported `artifact audit ok: 6 platform archives`. It recomputed the
+external ZIP checksums and verified the exact six-file archive allowlist, binary
+checksums, BUILD-INFO source/repository/tree/Cargo/patch values, Rust toolchain,
+native target identity, and checked-out provenance for every platform.
 
 ## Adversarial counter-review
 
@@ -586,16 +610,18 @@ The counter-review challenged the main conclusions as follows:
 - Could accepted reports be erased by the next turn's lifecycle callback? No.
   Accepted values have already moved from the Shadow runtime map into core-owned
   turn state. Failed installation drains the detached reservation queue.
-- Could generated schema files have been hand-edited into agreement? Local
-  provenance proves the recorded patch reconstruction, but only the remote schema
-  generator and drift check can prove generated-file agreement. AC8 therefore
-  remains pending.
+- Could generated schema files have been hand-edited into agreement? Exact-SHA
+  CI regenerated both stable and experimental schemas and passed the drift
+  checks. Together with local provenance reconstruction, this rules out a
+  hand-edited checked-in result that differs from the authoritative generator.
 - Could the review be mistaken for independent expert evidence? No. This file and
   the task contract explicitly identify it as separate inline passes by the main
   session. No agent or `dbs-chatroom` child was dispatched.
 
-No unresolved design disagreement was found. The remaining uncertainty is
-execution evidence owned by GitHub Actions and the release workflow.
+No unresolved design disagreement or branch validation gap remains. The next
+evidence boundary is the final one-commit `main` integration and its exact-SHA CI
+and release validation; branch evidence cannot be reused as proof for that new
+commit SHA.
 
 ## Local validation results
 
@@ -614,9 +640,11 @@ All permitted local checks passed on 2026-09-07:
 - Stale old-tag scan and Goal preimage reference allowlist.
 - CJK scan over `AGENTS.md` and the active task artifacts: no matches.
 
-Rust formatting, compilation, tests, Clippy, schema generation, Bazel generation,
-full CI, and native release builds were intentionally not run locally under the
-project validation policy.
+Rust formatting, compilation, tests, Clippy, schema generation, and Bazel
+generation were intentionally not run locally under the project validation
+policy; exact-SHA GitHub Actions run `34097162982` passed those gates. Release
+run `34100946905` passed all six native builds and its aggregate artifact audit.
+A separate local audit of the six downloaded archives also passed.
 
 ## AC1-AC12 evidence map
 
@@ -624,19 +652,21 @@ project validation policy.
 | --- | --- | --- |
 | AC1 | Provenance JSON, verifier constants, README, and decisions all identify `rust-v0.153.4` / `3d2ee51c...`. | Locally proven |
 | AC2 | Goal hash and patch order match; exact reconstruction succeeds with only three declared materialization differences. | Locally proven |
-| AC3 | Focused core/app-server tests encode bounded stream/429/5xx retries, repeated exhausted turns, Active Goal persistence, distinct automatic turns, and eventual completion. | Test coverage present; remote execution pending |
-| AC4 | Goal hook special-cases only `UsageLimitExceeded`; generic errors remain Active. The only retained three-turn protection is upstream execution-tool failure accounting. | Source and tests reviewed; remote execution pending |
-| AC5 | Touched retry, Goal, Guardian, session, history, and rendering paths have focused non-regression tests without old-module replacement. | Scope reviewed; remote execution pending |
-| AC6 | Typed wire, identity, UTF-8, ordering, ownership, pending/cancel, origin, persistence, app-server, and TUI tests are present. | Test coverage present; remote execution pending |
-| AC7 | Staged scope treats the complete release as the baseline and limits the fork delta to Goal/Shadow plus shared-boundary compatibility. | Inline scope audit passed; final post-CI diff audit pending |
-| AC8 | CI contains schema/Bazel generation and drift checks plus affected-crate Clippy with `-D warnings`. | Pending GitHub Actions |
-| AC9 | CI and six-target release workflows contain the required gates and artifact audit. | Replacement exact-SHA CI and release run pending |
-| AC10 | Current diff is scoped and rollback is documented as `632cc5b...`. | Pre-push audit passed; final post-CI audit pending |
+| AC3 | Focused core/app-server tests encode bounded stream/429/5xx retries, repeated exhausted turns, Active Goal persistence, distinct automatic turns, and eventual completion. | Proven by exact-SHA CI run `34097162982` |
+| AC4 | Goal hook special-cases only `UsageLimitExceeded`; generic errors remain Active. The only retained three-turn protection is upstream execution-tool failure accounting. | Proven by source review and exact-SHA CI |
+| AC5 | Touched retry, Goal, Guardian, session, history, and rendering paths have focused non-regression tests without old-module replacement. | Proven by scope review and exact-SHA CI |
+| AC6 | Typed wire, identity, UTF-8, ordering, ownership, pending/cancel, origin, persistence, app-server, and TUI tests are present. | Proven by exact-SHA CI run `34097162982` |
+| AC7 | Staged scope treats the complete release as the baseline and limits the fork delta to Goal/Shadow plus shared-boundary compatibility. | Inline scope and post-CI diff audit passed |
+| AC8 | Exact-SHA CI passed schema/Bazel generation and drift plus affected-crate Clippy with `-D warnings`. | Proven by run `34097162982` |
+| AC9 | Exact-SHA branch CI is green; all six native release jobs, the workflow aggregate audit, and an independent downloaded-artifact audit passed. | Proven by runs `34097162982` and `34100946905` plus the local six-archive audit |
+| AC10 | The branch diff is scoped, rollback is documented as `632cc5b...`, and the integration-history contract requires one squashed `main` commit. | Branch-side evidence proven; final `main` integration pending |
 | AC11 | Inline mode is persisted in `.trellis/config.yaml` and `AGENTS.md`; no child agent was dispatched. | Proven for work to date |
 | AC12 | Persisted active-task artifacts and `AGENTS.md` pass the no-CJK scan. | Proven for current files; rerun after any later edit |
 
-The task and active Goal must remain open. AC8 and AC9 are unproven until the
-remote Rust/schema/Bazel checks, full CI, and six-target release audit complete.
+The upgrade branch satisfies AC1-AC9, AC11, and AC12. The task and active Goal
+must remain open because AC10 is not complete until the accepted branch range is
+integrated into `main` as exactly one commit and that exact final commit passes
+its own CI and six-target release audit.
 
 ## Integration history boundary
 

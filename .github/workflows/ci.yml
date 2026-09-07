@@ -131,7 +131,9 @@ jobs:
       - name: Generate app-server schema fixtures
         id: generate_app_server_schema
         working-directory: codex-src/codex-rs
-        run: python app-server-protocol/scripts/write_schema_fixtures.py
+        run: |
+          python app-server-protocol/scripts/write_schema_fixtures.py
+          python app-server-protocol/scripts/write_schema_fixtures.py --experimental
 
       - name: Upload generated app-server schemas
         if: always() && steps.generate_app_server_schema.outcome == 'success'

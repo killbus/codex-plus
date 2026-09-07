@@ -313,6 +313,15 @@ Goal continuations, and other extension origins retain their existing eligibilit
 Completed Shadow report items persist in both legacy and paginated history and
 map to the same app-server/TUI identity, content, and order on replay.
 
+Pending-work startup must use one immutable mailbox observation for both context
+construction and final ownership transfer. `PendingMailboxTurnStart` records the
+observed mailbox prefix length together with its trigger flag, initiating agent
+path, and `TurnStartOptions`. After the pending-work reservation is revalidated,
+installation drains exactly that observed prefix and applies the same metadata.
+Messages that arrive after the observation remain queued for normal active-turn
+delivery or a later turn; they must not be attached to context built from the
+older snapshot.
+
 ### 4. Validation & Error Matrix
 
 - Accepted current idle epoch with no pending work -> one visible report and one
@@ -321,6 +330,12 @@ map to the same app-server/TUI identity, content, and order on replay.
 - User, Goal, unspecified, or non-Shadow extension origin -> normal eligibility.
 - Stale epoch, busy/Plan state, or pending trigger work -> no display item and no
   automatic turn.
+- Pending-work context construction fails -> clear only the still-owned
+  reservation and leave the observed mailbox prefix queued.
+- A user turn replaces a pending-work reservation -> leave the observed mailbox
+  items and all associated start options queued for that user-owned lifecycle.
+- Mail arrives after pending-work observation but before installation -> drain
+  only the observed prefix; keep the late arrival queued.
 - Cancel, timeout, user input, or thread stop before delivery -> clear undelivered
   reports and emit nothing.
 - Oversized or multibyte report -> truncate once at a valid UTF-8 byte boundary;
@@ -343,6 +358,10 @@ map to the same app-server/TUI identity, content, and order on replay.
   app-server boundary with all four payload fields.
 - Core tests assert accepted display/model ordering and prove stale, busy, Plan,
   and pending-work rejection emits no display lifecycle.
+- Input-queue and session regressions assert that pending-work startup applies one
+  observed mailbox snapshot, drains only its exact prefix, preserves late
+  arrivals, and preserves every queued `TurnStartOptions` field when ownership is
+  replaced.
 - Shadow tests assert one-time report draining, UTF-8-safe size limits,
   cancellation cleanup, Shadow-only origin suppression, and Goal/user eligibility.
 - Rollout and thread-history tests assert legacy/paginated persistence and replay
@@ -358,6 +377,14 @@ feedback suppression by parsing that model-visible text.
 Correct: pair a typed display-only item with the bounded model input inside the
 accepted idle turn, attach trusted runtime origin metadata, and suppress only
 `Extension("shadow")` at the following idle edge.
+
+Wrong: peek mailbox metadata to construct a pending-work context, then drain the
+entire mailbox during installation. A late arrival would inherit context and
+metadata that were computed before it existed.
+
+Correct: carry the observed `PendingMailboxTurnStart` through reservation
+validation and drain only its recorded prefix during the final ownership
+transfer.
 
 ## Forbidden Patterns
 

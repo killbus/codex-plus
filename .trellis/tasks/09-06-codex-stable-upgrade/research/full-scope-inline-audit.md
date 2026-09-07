@@ -160,13 +160,13 @@ peeled source commit. Reconstruction uses this ordered chain:
    applied with deterministic three-way semantics using preimage commit
    `bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb`.
 2. `patches/shadow-mind.patch`, SHA-256
-   `8df949f057726149eef681533b2f463af01cbe3f219b61f5dd69318ef9525df5`,
+   `6cfa8b36c644ff9476e648f176ad9bc5c468ddd2459c444b80afd856deeb4e97`,
    applied directly.
 
 The source tree digest is
-`efdc5a4b7393b37d891da27664ac9e6b7254685201c5b593f5b44a5270da4b68`;
+`b6121fe9065f4abd5cbaa6b191c0908858bd4efd94ee41d62ad2d3328b7737b7`;
 the rebuilt digest is
-`7a256f2af6c1094ecbd5ad3e855074dda9eed8800d243fbb8a0058f20470156c`.
+`0ae02b83366b67cd77bbd5d23a15efde7679e41d3b2a0d1256c493f1a4997e74`.
 The only expected materialization differences are the three recorded `.vscode`
 files. The source-side Cargo lock digest is recorded independently under
 `source_file_sha256` as
@@ -268,6 +268,24 @@ formatter-requested import order. Both source trees are byte-identical for all
 `patches/shadow-mind.patch` byte-for-byte. The Goal patch hash remains unchanged;
 the regenerated Shadow patch and tree hashes are the values recorded above. A
 replacement CI run is required before any runtime or release acceptance claim.
+
+The subsequent pending-work review found a narrower ownership race before the
+replacement run. Pending-work startup observed mailbox metadata while building
+`TurnContext`, but final installation drained the mailbox's then-current full
+contents. A message arriving between those operations could therefore enter a
+turn whose trigger, service tier, output schema, cyber-access program, and
+lineage were computed without that message. The corrective delta introduces
+`PendingMailboxTurnStart`, carries one observed mailbox prefix and its start
+metadata through the reservation, and drains exactly that prefix only after the
+reservation is revalidated. Late arrivals remain queued. Context-construction
+failure or user-turn replacement leaves the still-owned snapshot queued rather
+than consuming it. Regressions cover exact-prefix draining and preservation of
+all queued start-option fields.
+
+The obsolete CI step that built and tested an intermediate Goal-only tree was
+also removed. CI now tests `codex-goal-extension` continuation policy against
+the final integrated `codex-src/codex-rs` tree, which is the artifact actually
+shipped and includes the required Goal/Shadow compatibility cleanup.
 
 GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
 with `-D warnings`, app-server schema generation/drift, Bazel lock generation/

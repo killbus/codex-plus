@@ -29,6 +29,7 @@ use crate::codex_thread::BackgroundTerminalInfo;
 use crate::config::Config;
 use crate::context::ContextualUserFragment;
 use crate::hook_runtime::run_turn_interrupt_hooks;
+use crate::session::SessionSettingsUpdate;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn::run_hooks_and_record_inputs;
@@ -270,7 +271,10 @@ where
 
 enum TaskStartOwnership {
     Available,
-    PendingWorkReservation(Arc<tokio::sync::Mutex<TurnState>>),
+    PendingWorkReservation {
+        turn_state: Arc<tokio::sync::Mutex<TurnState>>,
+        pending_turn_start: crate::session::input_queue::PendingMailboxTurnStart,
+    },
     IdleReservation(Arc<tokio::sync::Mutex<TurnState>>),
 }
 
@@ -428,14 +432,14 @@ impl Session {
         // A pending-work reservation keeps the active-turn guard until its task is installed.
         // This makes the ownership check, pending-input extraction, and installation one handoff.
         let pending_work_active_turn = match &ownership {
-            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
+            TaskStartOwnership::PendingWorkReservation { turn_state, .. } => {
                 let active = self.active_turn.lock().await;
                 let Some(turn) = active.as_ref() else {
                     return false;
                 };
                 if turn.idle_reservation
                     || turn.task.is_some()
-                    || !Arc::ptr_eq(&turn.turn_state, expected_turn_state)
+                    || !Arc::ptr_eq(&turn.turn_state, turn_state)
                 {
                     return false;
                 }
@@ -451,8 +455,11 @@ impl Session {
                 Vec::new(),
                 codex_protocol::turn_input::TurnStartOptions::default(),
             ),
-            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
-                let accepts_mailbox_delivery = expected_turn_state
+            TaskStartOwnership::PendingWorkReservation {
+                turn_state,
+                pending_turn_start,
+            } => {
+                let accepts_mailbox_delivery = turn_state
                     .lock()
                     .await
                     .accepts_mailbox_delivery_for_current_turn();
@@ -462,14 +469,16 @@ impl Session {
                         codex_protocol::turn_input::TurnStartOptions::default(),
                     )
                 } else {
+                    let mailbox_items = self
+                        .input_queue
+                        .drain_mailbox_input_items_for_turn_start(pending_turn_start)
+                        .await;
                     let mut pending_items = self
                         .input_queue
-                        .take_pending_input_for_turn_state(expected_turn_state.as_ref())
+                        .take_pending_input_for_turn_state(turn_state.as_ref())
                         .await;
-                    let (mailbox_items, start_options) =
-                        self.input_queue.drain_mailbox_input_items().await;
                     pending_items.extend(mailbox_items);
-                    (pending_items, start_options)
+                    (pending_items, pending_turn_start.start_options.clone())
                 }
             }
         };
@@ -480,13 +489,13 @@ impl Session {
         let mut automatic_turn_admission = None;
         let turn = match &ownership {
             TaskStartOwnership::Available => active.get_or_insert_with(ActiveTurn::default),
-            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
+            TaskStartOwnership::PendingWorkReservation { turn_state, .. } => {
                 let Some(turn) = active.as_mut() else {
                     return false;
                 };
                 if turn.idle_reservation
                     || turn.task.is_some()
-                    || !Arc::ptr_eq(&turn.turn_state, expected_turn_state)
+                    || !Arc::ptr_eq(&turn.turn_state, turn_state)
                 {
                     return false;
                 }
@@ -684,39 +693,56 @@ impl Session {
             turn_state
         };
 
-        let (input, mut start_options) =
-            self.input_queue.get_pending_input(&self.active_turn).await;
-        if !input.iter().any(
-            |item| matches!(item, TurnInput::InterAgentCommunication(mail) if mail.trigger_turn),
-        ) {
+        // Inspect the queued work without consuming it. The reservation can still be replaced by
+        // a user turn while its context is prepared, so mailbox ownership transfers only inside
+        // start_task_with_ownership after the reservation is revalidated.
+        let pending_turn_start = self.input_queue.peek_pending_mailbox_turn_start().await;
+        let mut start_options = pending_turn_start.start_options.clone();
+        if !pending_turn_start.has_trigger_turn {
             // Queue-only mail wakes durable sleep without selecting a new task's settings.
             start_options.cyber_access_program = self
                 .reference_context_item()
                 .await
                 .and_then(|context| context.cyber_access_program);
         }
-        let turn_context = self
-            .new_turn_with_default_settings(
+        let turn_context = match self
+            .new_turn_with_sub_id(
                 sub_id,
+                SessionSettingsUpdate {
+                    service_tier_for_turn: start_options.service_tier.clone(),
+                    ..Default::default()
+                },
                 NewTurnContextOptions {
                     final_output_json_schema: start_options.final_output_json_schema,
                     cyber_access_program: start_options.cyber_access_program,
                     automatic_turn_origin: AutomaticTurnOrigin::Unspecified,
                 },
             )
-            .await;
+            .await
+        {
+            Ok((turn_context, _settings_snapshot)) => turn_context,
+            Err(_) => {
+                let mut active_turn = self.active_turn.lock().await;
+                if active_turn.as_ref().is_some_and(|turn| {
+                    !turn.idle_reservation
+                        && turn.task.is_none()
+                        && Arc::ptr_eq(&turn.turn_state, &turn_state)
+                }) {
+                    *active_turn = None;
+                }
+                return;
+            }
+        };
+        if let Some(turn_trigger) = start_options.turn_trigger {
+            turn_context
+                .turn_metadata_state
+                .set_turn_trigger(turn_trigger);
+        }
         if let Some(id) = start_options.parent_turn_id {
-            if let Some(initiating_agent_path) = input.iter().find_map(|item| {
-                let TurnInput::InterAgentCommunication(communication) = item else {
-                    return None;
-                };
-                communication
-                    .trigger_turn
-                    .then(|| communication.author.clone())
-            }) {
+            if let Some(initiating_agent_path) = pending_turn_start.initiating_agent_path.as_ref() {
                 turn_context
                     .turn_metadata_state
-                    .set_initiating_agent_path(initiating_agent_path);
+                    .set_initiating_agent_path(initiating_agent_path.clone());
             }
             turn_context.turn_metadata_state.set_parent_turn_id(id);
         }
@@ -725,10 +751,6 @@ impl Session {
         }
         self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
             .await;
-        // Task completion must still save this mail if pre-turn compaction fails.
-        self.input_queue
-            .extend_pending_input_for_turn_state(turn_state.as_ref(), input)
-            .await;
         #[cfg(test)]
         self.wait_at_pending_work_start_test_gate().await;
         let _installed = self
@@ -736,7 +758,10 @@ impl Session {
                 turn_context,
                 Vec::new(),
                 RegularTask::new(),
-                TaskStartOwnership::PendingWorkReservation(turn_state),
+                TaskStartOwnership::PendingWorkReservation {
+                    turn_state,
+                    pending_turn_start,
+                },
             )
             .await;
     }

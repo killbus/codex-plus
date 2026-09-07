@@ -322,16 +322,20 @@ class VerifyProvenanceTest(unittest.TestCase):
         self.assertIn("/patches/** text eol=lf", attributes)
         self.assertIn("/docs/provenance.json text eol=lf", attributes)
 
-    def test_ci_goal_only_baseline_uses_shared_three_way_application(self) -> None:
+    def test_ci_tests_integrated_goal_continuation_policy(self) -> None:
         workflow = (REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
-        step = workflow.split("- name: Test goal-only compatibility baseline", 1)[1]
+        step = workflow.split("- name: Test integrated Goal continuation policy", 1)[1]
         step = step.split("- name: Check Shadow extension", 1)[0]
 
-        self.assertIn("from scripts.verify_provenance import apply_patch", step)
-        self.assertIn("fetch_preimages=True", step)
-        self.assertNotIn("git -C \"$goal_only\" apply", step)
+        self.assertIn("working-directory: codex-src/codex-rs", step)
+        self.assertIn(
+            "cargo test --locked -p codex-goal-extension turn_error_",
+            step,
+        )
+        self.assertNotIn("goal_only", step)
+        self.assertNotIn("apply_patch", step)
 
     def test_integrated_goal_runtime_drops_unreachable_turn_error_stop_reason(self) -> None:
         goal_patch = REPOSITORY_ROOT / "patches" / "goal-old-continuation.patch"

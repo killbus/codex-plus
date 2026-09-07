@@ -9406,18 +9406,19 @@ index 6c103f266c..b5cc916bce 100644
      #[expect(
          clippy::await_holding_invalid_type,
 diff --git a/codex-rs/core/src/session/input_queue.rs b/codex-rs/core/src/session/input_queue.rs
-index e6bd3ba388..206b5debf6 100644
+index e6bd3ba388..9901f41e92 100644
 --- a/codex-rs/core/src/session/input_queue.rs
 +++ b/codex-rs/core/src/session/input_queue.rs
-@@ -4,6 +4,7 @@ use crate::state::TurnState;
+@@ -4,6 +4,8 @@ use crate::state::TurnState;
  use codex_diagnostics::Gauge;
  use codex_diagnostics::GaugeGuard;
  use codex_history::ResponseItemEnvelope;
++use codex_protocol::AgentPath;
 +use codex_protocol::items::TurnItem;
  use codex_protocol::models::ResponseItem;
  use codex_protocol::protocol::InterAgentCommunication;
  use codex_protocol::turn_input::TurnStartOptions;
-@@ -18,7 +19,7 @@ use tokio::sync::watch;
+@@ -18,7 +20,7 @@ use tokio::sync::watch;
  static PENDING_MAILBOX_MESSAGES: Gauge = Gauge::new("core.mailbox.pending");
  
  /// Input consumed by a regular turn.
@@ -9426,7 +9427,7 @@ index e6bd3ba388..206b5debf6 100644
  pub enum TurnInput {
      UserInput {
          content: Vec<UserInput>,
-@@ -28,6 +29,7 @@ pub enum TurnInput {
+@@ -28,6 +30,7 @@ pub enum TurnInput {
      // Preserve the existing serialized format while carrying injection API metadata
      // through the in-memory queue.
      ResponseItem(#[serde(with = "turn_input_response_item")] ResponseItemEnvelope),
@@ -9434,7 +9435,99 @@ index e6bd3ba388..206b5debf6 100644
      InterAgentCommunication(InterAgentCommunication),
  }
  
-@@ -388,7 +390,11 @@ mod tests {
+@@ -87,6 +90,13 @@ struct PendingMailboxCommunication {
+     _diagnostics_guard: GaugeGuard,
+ }
+ 
++pub(crate) struct PendingMailboxTurnStart {
++    pending_mail_count: usize,
++    pub(crate) has_trigger_turn: bool,
++    pub(crate) initiating_agent_path: Option<AgentPath>,
++    pub(crate) start_options: TurnStartOptions,
++}
++
+ impl InputQueue {
+     pub(crate) fn new() -> Self {
+         let (activity_tx, _) = watch::channel(InputQueueActivity::Mailbox);
+@@ -147,13 +157,9 @@ impl InputQueue {
+             .any(|mail| mail.communication.trigger_turn)
+     }
+ 
+-    pub(crate) async fn drain_mailbox_input_items(&self) -> (Vec<TurnInput>, TurnStartOptions) {
+-        let pending_mails = self
+-            .mailbox_pending_mails
+-            .lock()
+-            .await
+-            .drain(..)
+-            .collect::<Vec<_>>();
++    fn pending_mailbox_turn_start(
++        pending_mails: &VecDeque<PendingMailboxCommunication>,
++    ) -> PendingMailboxTurnStart {
+         // A later follow-up supersedes the earlier choice, including an omitted choice.
+         let mut start_options = pending_mails
+             .iter()
+@@ -179,10 +185,57 @@ impl InputQueue {
+                     .filter(|id| !id.trim().is_empty())
+             })
+             .map(str::to_string);
+-        let items = pending_mails
+-            .into_iter()
++        PendingMailboxTurnStart {
++            pending_mail_count: pending_mails.len(),
++            has_trigger_turn: pending_mails
++                .iter()
++                .any(|mail| mail.communication.trigger_turn),
++            initiating_agent_path: pending_mails
++                .iter()
++                .find(|mail| mail.communication.trigger_turn)
++                .map(|mail| mail.communication.author.clone()),
++            start_options,
++        }
++    }
++
++    pub(crate) async fn peek_pending_mailbox_turn_start(&self) -> PendingMailboxTurnStart {
++        let pending_mails = self.mailbox_pending_mails.lock().await;
++        Self::pending_mailbox_turn_start(&pending_mails)
++    }
++
++    fn drain_mailbox_input_items_prefix(
++        pending_mails: &mut VecDeque<PendingMailboxCommunication>,
++        pending_mail_count: usize,
++    ) -> Vec<TurnInput> {
++        assert!(
++            pending_mail_count <= pending_mails.len(),
++            "pending mailbox prefix changed before ownership transfer"
++        );
++        pending_mails
++            .drain(..pending_mail_count)
+             .map(|mail| TurnInput::InterAgentCommunication(mail.communication))
+-            .collect();
++            .collect()
++    }
++
++    pub(crate) async fn drain_mailbox_input_items_for_turn_start(
++        &self,
++        pending_turn_start: &PendingMailboxTurnStart,
++    ) -> Vec<TurnInput> {
++        let mut pending_mails = self.mailbox_pending_mails.lock().await;
++        Self::drain_mailbox_input_items_prefix(
++            &mut pending_mails,
++            pending_turn_start.pending_mail_count,
++        )
++    }
++
++    pub(crate) async fn drain_mailbox_input_items(&self) -> (Vec<TurnInput>, TurnStartOptions) {
++        let mut pending_mails = self.mailbox_pending_mails.lock().await;
++        let pending_turn_start = Self::pending_mailbox_turn_start(&pending_mails);
++        let items = Self::drain_mailbox_input_items_prefix(
++            &mut pending_mails,
++            pending_turn_start.pending_mail_count,
++        );
++        let start_options = pending_turn_start.start_options;
+         (items, start_options)
+     }
+ 
+@@ -388,7 +441,11 @@ mod tests {
          let value = serde_json::json!({"ResponseItem": item});
  
          assert_eq!(serde_json::to_value(&input).unwrap(), value);
@@ -9447,17 +9540,10 @@ index e6bd3ba388..206b5debf6 100644
  
          let annotated = TurnInput::ResponseItem(ResponseItemEnvelope {
              item: ResponseItem::Other,
-@@ -543,13 +549,16 @@ mod tests {
+@@ -543,14 +600,76 @@ mod tests {
              .enqueue_mailbox_communication(mail_two.clone(), Default::default())
              .await;
  
--        assert_eq!(
--            input_queue.drain_mailbox_input_items().await.0,
--            vec![
--                TurnInput::InterAgentCommunication(mail_one),
--                TurnInput::InterAgentCommunication(mail_two)
--            ]
--        );
 +        let pending_input = input_queue.drain_mailbox_input_items().await.0;
 +        let [
 +            TurnInput::InterAgentCommunication(actual_mail_one),
@@ -9468,9 +9554,75 @@ index e6bd3ba388..206b5debf6 100644
 +        };
 +        assert_eq!(actual_mail_one, &mail_one);
 +        assert_eq!(actual_mail_two, &mail_two);
-         assert!(!input_queue.has_pending_mailbox_items().await);
++        assert!(!input_queue.has_pending_mailbox_items().await);
++    }
++
++    #[tokio::test]
++    async fn input_queue_snapshot_drains_only_observed_mailbox_prefix() {
++        let input_queue = InputQueue::new();
++        let first = make_mail(
++            AgentPath::root(),
++            AgentPath::try_from("/root/first").expect("agent path"),
++            "first",
++            /*trigger_turn*/ true,
++        );
++        let second = make_mail(
++            AgentPath::root(),
++            AgentPath::try_from("/root/second").expect("agent path"),
++            "second",
++            /*trigger_turn*/ true,
++        );
++        input_queue
++            .enqueue_mailbox_communication(
++                first.clone(),
++                TurnStartOptions {
++                    turn_trigger: Some("first".to_owned()),
++                    ..Default::default()
++                },
++            )
++            .await;
++        let pending_turn_start = input_queue.peek_pending_mailbox_turn_start().await;
++        input_queue
++            .enqueue_mailbox_communication(
++                second.clone(),
++                TurnStartOptions {
++                    turn_trigger: Some("second".to_owned()),
++                    ..Default::default()
++                },
++            )
++            .await;
++
++        let pending_input = input_queue
++            .drain_mailbox_input_items_for_turn_start(&pending_turn_start)
++            .await;
++        let [TurnInput::InterAgentCommunication(actual_first)] = pending_input.as_slice() else {
++            panic!("expected only the observed mailbox prefix");
++        };
++        assert_eq!(actual_first, &first);
+         assert_eq!(
+-            input_queue.drain_mailbox_input_items().await.0,
+-            vec![
+-                TurnInput::InterAgentCommunication(mail_one),
+-                TurnInput::InterAgentCommunication(mail_two)
+-            ]
++            pending_turn_start.start_options.turn_trigger.as_deref(),
++            Some("first")
++        );
++
++        let (remaining_input, remaining_start_options) =
++            input_queue.drain_mailbox_input_items().await;
++        let [TurnInput::InterAgentCommunication(actual_second)] = remaining_input.as_slice() else {
++            panic!("expected later mail to remain queued");
++        };
++        assert_eq!(actual_second, &second);
++        assert_eq!(
++            remaining_start_options.turn_trigger.as_deref(),
++            Some("second")
+         );
+-        assert!(!input_queue.has_pending_mailbox_items().await);
      }
  
+     #[tokio::test]
 diff --git a/codex-rs/core/src/session/review.rs b/codex-rs/core/src/session/review.rs
 index cf7392ca26..abe62e3b3d 100644
 --- a/codex-rs/core/src/session/review.rs
@@ -9613,7 +9765,7 @@ index 6d1953e3a2..3aaeebfe78 100644
              if let Some(network_policy_decider_session) = network_policy_decider_session {
                  let mut guard = network_policy_decider_session.write().await;
 diff --git a/codex-rs/core/src/session/tests.rs b/codex-rs/core/src/session/tests.rs
-index b5931b330e..31bf8caab6 100644
+index b5931b330e..4b90edf33e 100644
 --- a/codex-rs/core/src/session/tests.rs
 +++ b/codex-rs/core/src/session/tests.rs
 @@ -6,6 +6,7 @@ pub(crate) use super::step_settings::tests::update_selected_settings_for_test;
@@ -9723,7 +9875,7 @@ index b5931b330e..31bf8caab6 100644
      });
      let per_turn_config =
          session.build_per_turn_config(&session_configuration, session_configuration.cwd().clone());
-@@ -11898,6 +11949,856 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
+@@ -11898,6 +11949,882 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
      assert_eq!(0, calls.load(std::sync::atomic::Ordering::SeqCst));
  }
  
@@ -10209,8 +10361,19 @@ index b5931b330e..31bf8caab6 100644
 +        "pending trigger work".to_owned(),
 +        /*trigger_turn*/ true,
 +    );
++    let trigger_start_options = codex_protocol::turn_input::TurnStartOptions {
++        turn_trigger: Some("agent_followup".to_owned()),
++        final_output_json_schema: Some(serde_json::json!({"type": "object"})),
++        service_tier: Some("priority".to_owned()),
++        parent_turn_id: Some("parent-turn".to_owned()),
++        root_turn_id: Some("root-turn".to_owned()),
++        cyber_access_program: Some(codex_protocol::turn_input::CyberAccessProgram::DaybreakBlue),
++    };
 +    sess.input_queue
-+        .enqueue_mailbox_communication(trigger_communication.clone(), Default::default())
++        .enqueue_mailbox_communication(
++            trigger_communication.clone(),
++            trigger_start_options.clone(),
++        )
 +        .await;
 +
 +    let gate = PendingWorkStartTestGate::default();
@@ -10275,7 +10438,7 @@ index b5931b330e..31bf8caab6 100644
 +        Some((user_turn.sub_id.clone(), AutomaticTurnOrigin::Unspecified,))
 +    );
 +
-+    let (pending_input, _start_options) =
++    let (pending_input, start_options) =
 +        sess.input_queue.get_pending_input(&sess.active_turn).await;
 +    assert_eq!(
 +        pending_input.len(),
@@ -10311,6 +10474,21 @@ index b5931b330e..31bf8caab6 100644
 +        pending_trigger_communication,
 +        Some(&trigger_communication),
 +        "stale pending-work startup must not drain trigger mailbox input"
++    );
++    assert_eq!(start_options.turn_trigger, trigger_start_options.turn_trigger);
++    assert_eq!(
++        start_options.final_output_json_schema,
++        trigger_start_options.final_output_json_schema
++    );
++    assert_eq!(start_options.service_tier, trigger_start_options.service_tier);
++    assert_eq!(
++        start_options.parent_turn_id,
++        trigger_start_options.parent_turn_id
++    );
++    assert_eq!(start_options.root_turn_id, trigger_start_options.root_turn_id);
++    assert_eq!(
++        start_options.cyber_access_program,
++        trigger_start_options.cyber_access_program
 +    );
 +
 +    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
@@ -10580,7 +10758,7 @@ index b5931b330e..31bf8caab6 100644
  #[tokio::test]
  async fn abort_empty_active_turn_preserves_pending_input() {
      let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
-@@ -11925,12 +12826,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
+@@ -11925,12 +12852,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
      sess.abort_all_tasks(TurnAbortReason::Replaced).await;
  
      assert!(sess.active_turn.lock().await.is_none());
@@ -10601,7 +10779,7 @@ index b5931b330e..31bf8caab6 100644
  }
  
  async fn set_total_token_usage(sess: &Session, total_token_usage: TokenUsage) {
-@@ -11973,20 +12876,23 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
+@@ -11973,20 +12902,23 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
          !sess.input_queue.has_pending_input(&sess.active_turn).await,
          "queue-only mailbox mail should stay buffered once the current turn emitted its answer"
      );
@@ -10632,7 +10810,7 @@ index b5931b330e..31bf8caab6 100644
  }
  
  #[tokio::test]
-@@ -12072,13 +12978,17 @@ async fn active_turn_keeps_first_root_when_mail_coalesces() {
+@@ -12072,13 +13004,17 @@ async fn active_turn_keeps_first_root_when_mail_coalesces() {
              .await;
      }
  
@@ -10657,7 +10835,7 @@ index b5931b330e..31bf8caab6 100644
      assert_eq!(
          tc.turn_metadata_state.root_turn_id().as_deref(),
          Some("root-a")
-@@ -12125,19 +13035,24 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
+@@ -12125,19 +13061,24 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
      .await;
      assert!(matches!(submission, TurnInputSubmission::Steered { .. }));
  
@@ -10693,7 +10871,7 @@ index b5931b330e..31bf8caab6 100644
  }
  
  #[tokio::test]
-@@ -12181,19 +13096,24 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
+@@ -12181,19 +13122,24 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
          .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
          .await;
  
@@ -10729,7 +10907,7 @@ index b5931b330e..31bf8caab6 100644
  }
  
  #[tokio::test]
-@@ -12246,10 +13166,13 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
+@@ -12246,10 +13192,13 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
  
      assert!(output.needs_follow_up);
      assert!(output.tool_future.is_some());
@@ -11208,7 +11386,7 @@ index cde3fc7d72..c44181f938 100644
              contributor
                  .on_turn_abort(codex_extension_api::TurnAbortInput {
 diff --git a/codex-rs/core/src/tasks/mod.rs b/codex-rs/core/src/tasks/mod.rs
-index 5bf41019d5..58dd703feb 100644
+index 5bf41019d5..4bbc395d23 100644
 --- a/codex-rs/core/src/tasks/mod.rs
 +++ b/codex-rs/core/src/tasks/mod.rs
 @@ -9,6 +9,7 @@ use std::time::Duration;
@@ -11219,13 +11397,24 @@ index 5bf41019d5..58dd703feb 100644
  use codex_extension_api::ThreadIdleCause;
  use futures::future::BoxFuture;
  use tokio::select;
-@@ -267,7 +268,110 @@ where
+@@ -28,6 +29,7 @@ use crate::codex_thread::BackgroundTerminalInfo;
+ use crate::config::Config;
+ use crate::context::ContextualUserFragment;
+ use crate::hook_runtime::run_turn_interrupt_hooks;
++use crate::session::SessionSettingsUpdate;
+ use crate::session::TurnInput;
+ use crate::session::session::Session;
+ use crate::session::turn::run_hooks_and_record_inputs;
+@@ -267,7 +269,113 @@ where
      }
  }
  
 +enum TaskStartOwnership {
 +    Available,
-+    PendingWorkReservation(Arc<tokio::sync::Mutex<TurnState>>),
++    PendingWorkReservation {
++        turn_state: Arc<tokio::sync::Mutex<TurnState>>,
++        pending_turn_start: crate::session::input_queue::PendingMailboxTurnStart,
++    },
 +    IdleReservation(Arc<tokio::sync::Mutex<TurnState>>),
 +}
 +
@@ -11330,7 +11519,7 @@ index 5bf41019d5..58dd703feb 100644
      pub async fn spawn_task<T: SessionTask>(
          self: &Arc<Self>,
          turn_context: Arc<TurnContext>,
-@@ -285,9 +389,129 @@ impl Session {
+@@ -285,9 +393,134 @@ impl Session {
          input: Vec<TurnInput>,
          task: T,
      ) {
@@ -11373,14 +11562,14 @@ index 5bf41019d5..58dd703feb 100644
 +        // A pending-work reservation keeps the active-turn guard until its task is installed.
 +        // This makes the ownership check, pending-input extraction, and installation one handoff.
 +        let pending_work_active_turn = match &ownership {
-+            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
++            TaskStartOwnership::PendingWorkReservation { turn_state, .. } => {
 +                let active = self.active_turn.lock().await;
 +                let Some(turn) = active.as_ref() else {
 +                    return false;
 +                };
 +                if turn.idle_reservation
 +                    || turn.task.is_some()
-+                    || !Arc::ptr_eq(&turn.turn_state, expected_turn_state)
++                    || !Arc::ptr_eq(&turn.turn_state, turn_state)
 +                {
 +                    return false;
 +                }
@@ -11396,8 +11585,11 @@ index 5bf41019d5..58dd703feb 100644
 +                Vec::new(),
 +                codex_protocol::turn_input::TurnStartOptions::default(),
 +            ),
-+            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
-+                let accepts_mailbox_delivery = expected_turn_state
++            TaskStartOwnership::PendingWorkReservation {
++                turn_state,
++                pending_turn_start,
++            } => {
++                let accepts_mailbox_delivery = turn_state
 +                    .lock()
 +                    .await
 +                    .accepts_mailbox_delivery_for_current_turn();
@@ -11407,14 +11599,16 @@ index 5bf41019d5..58dd703feb 100644
 +                        codex_protocol::turn_input::TurnStartOptions::default(),
 +                    )
 +                } else {
++                    let mailbox_items = self
++                        .input_queue
++                        .drain_mailbox_input_items_for_turn_start(pending_turn_start)
++                        .await;
 +                    let mut pending_items = self
 +                        .input_queue
-+                        .take_pending_input_for_turn_state(expected_turn_state.as_ref())
++                        .take_pending_input_for_turn_state(turn_state.as_ref())
 +                        .await;
-+                    let (mailbox_items, start_options) =
-+                        self.input_queue.drain_mailbox_input_items().await;
 +                    pending_items.extend(mailbox_items);
-+                    (pending_items, start_options)
++                    (pending_items, pending_turn_start.start_options.clone())
 +                }
 +            }
 +        };
@@ -11425,13 +11619,13 @@ index 5bf41019d5..58dd703feb 100644
 +        let mut automatic_turn_admission = None;
 +        let turn = match &ownership {
 +            TaskStartOwnership::Available => active.get_or_insert_with(ActiveTurn::default),
-+            TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
++            TaskStartOwnership::PendingWorkReservation { turn_state, .. } => {
 +                let Some(turn) = active.as_mut() else {
 +                    return false;
 +                };
 +                if turn.idle_reservation
 +                    || turn.task.is_some()
-+                    || !Arc::ptr_eq(&turn.turn_state, expected_turn_state)
++                    || !Arc::ptr_eq(&turn.turn_state, turn_state)
 +                {
 +                    return false;
 +                }
@@ -11460,7 +11654,7 @@ index 5bf41019d5..58dd703feb 100644
          let started_at = Instant::now();
          let turn_started_at_unix_ms = turn_context
              .turn_timing_state
-@@ -306,8 +530,6 @@ impl Session {
+@@ -306,8 +539,6 @@ impl Session {
              .lock()
              .await
              .clear_turn(&turn_context.sub_id);
@@ -11469,7 +11663,7 @@ index 5bf41019d5..58dd703feb 100644
          if turn_context.turn_metadata_state.root_turn_id().is_none()
              && let Some(root_turn_id) = start_options.root_turn_id
          {
-@@ -315,12 +537,13 @@ impl Session {
+@@ -315,12 +546,13 @@ impl Session {
                  .turn_metadata_state
                  .set_root_turn_id(root_turn_id);
          }
@@ -11489,7 +11683,7 @@ index 5bf41019d5..58dd703feb 100644
          turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
          self.input_queue
              .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
-@@ -328,9 +551,6 @@ impl Session {
+@@ -328,9 +560,6 @@ impl Session {
          self.emit_turn_start_lifecycle(turn_context.as_ref(), &token_usage_at_turn_start)
              .await;
  
@@ -11499,7 +11693,7 @@ index 5bf41019d5..58dd703feb 100644
          let agent_execution_guard = self.services.agent_control.execution_guard(
              turn_context.multi_agent_version,
              &turn_context.session_source,
-@@ -409,6 +629,8 @@ impl Session {
+@@ -409,6 +638,8 @@ impl Session {
              _timer: timer,
          };
          turn.task = Some(running_task);
@@ -11508,7 +11702,7 @@ index 5bf41019d5..58dd703feb 100644
      }
  
      /// Returns whether an extension has marked this thread as durably asleep.
-@@ -456,8 +678,10 @@ impl Session {
+@@ -456,42 +687,62 @@ impl Session {
              if active_turn.is_some() {
                  return;
              }
@@ -11520,19 +11714,84 @@ index 5bf41019d5..58dd703feb 100644
 +            turn_state
          };
  
-         let (input, mut start_options) =
-@@ -477,6 +701,7 @@ impl Session {
+-        let (input, mut start_options) =
+-            self.input_queue.get_pending_input(&self.active_turn).await;
+-        if !input.iter().any(
+-            |item| matches!(item, TurnInput::InterAgentCommunication(mail) if mail.trigger_turn),
+-        ) {
++        // Inspect the queued work without consuming it. The reservation can still be replaced by
++        // a user turn while its context is prepared, so mailbox ownership transfers only inside
++        // start_task_with_ownership after the reservation is revalidated.
++        let pending_turn_start = self.input_queue.peek_pending_mailbox_turn_start().await;
++        let mut start_options = pending_turn_start.start_options.clone();
++        if !pending_turn_start.has_trigger_turn {
+             // Queue-only mail wakes durable sleep without selecting a new task's settings.
+             start_options.cyber_access_program = self
+                 .reference_context_item()
+                 .await
+                 .and_then(|context| context.cyber_access_program);
+         }
+-        let turn_context = self
+-            .new_turn_with_default_settings(
++        let turn_context = match self
++            .new_turn_with_sub_id(
+                 sub_id,
++                SessionSettingsUpdate {
++                    service_tier_for_turn: start_options.service_tier.clone(),
++                    ..Default::default()
++                },
                  NewTurnContextOptions {
                      final_output_json_schema: start_options.final_output_json_schema,
                      cyber_access_program: start_options.cyber_access_program,
 +                    automatic_turn_origin: AutomaticTurnOrigin::Unspecified,
                  },
              )
+-            .await;
++            .await
++        {
++            Ok((turn_context, _settings_snapshot)) => turn_context,
++            Err(_) => {
++                let mut active_turn = self.active_turn.lock().await;
++                if active_turn.as_ref().is_some_and(|turn| {
++                    !turn.idle_reservation
++                        && turn.task.is_none()
++                        && Arc::ptr_eq(&turn.turn_state, &turn_state)
++                }) {
++                    *active_turn = None;
++                }
++                return;
++            }
++        };
++        if let Some(turn_trigger) = start_options.turn_trigger {
++            turn_context
++                .turn_metadata_state
++                .set_turn_trigger(turn_trigger);
++        }
+         if let Some(id) = start_options.parent_turn_id {
+-            if let Some(initiating_agent_path) = input.iter().find_map(|item| {
+-                let TurnInput::InterAgentCommunication(communication) = item else {
+-                    return None;
+-                };
+-                communication
+-                    .trigger_turn
+-                    .then(|| communication.author.clone())
+-            }) {
++            if let Some(initiating_agent_path) = pending_turn_start.initiating_agent_path.as_ref() {
+                 turn_context
+                     .turn_metadata_state
+-                    .set_initiating_agent_path(initiating_agent_path);
++                    .set_initiating_agent_path(initiating_agent_path.clone());
+             }
+             turn_context.turn_metadata_state.set_parent_turn_id(id);
+         }
+@@ -500,11 +751,18 @@ impl Session {
+         }
+         self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
              .await;
-@@ -504,7 +729,15 @@ impl Session {
-         self.input_queue
-             .extend_pending_input_for_turn_state(turn_state.as_ref(), input)
-             .await;
+-        // Task completion must still save this mail if pre-turn compaction fails.
+-        self.input_queue
+-            .extend_pending_input_for_turn_state(turn_state.as_ref(), input)
+-            .await;
 -        self.start_task(turn_context, Vec::new(), RegularTask::new())
 +        #[cfg(test)]
 +        self.wait_at_pending_work_start_test_gate().await;
@@ -11541,12 +11800,15 @@ index 5bf41019d5..58dd703feb 100644
 +                turn_context,
 +                Vec::new(),
 +                RegularTask::new(),
-+                TaskStartOwnership::PendingWorkReservation(turn_state),
++                TaskStartOwnership::PendingWorkReservation {
++                    turn_state,
++                    pending_turn_start,
++                },
 +            )
              .await;
      }
  
-@@ -526,7 +759,7 @@ impl Session {
+@@ -526,7 +784,7 @@ impl Session {
          }
  
          if let Some(turn_context) = turn_context.as_deref() {
@@ -11555,7 +11817,7 @@ index 5bf41019d5..58dd703feb 100644
                  .await;
          }
          if let Some(active_turn) = active_turn_to_clear {
-@@ -573,7 +806,7 @@ impl Session {
+@@ -573,7 +831,7 @@ impl Session {
                  .await;
          }
          if let Some(turn_context) = turn_context.as_deref() {
@@ -11564,7 +11826,7 @@ index 5bf41019d5..58dd703feb 100644
                  .await;
          }
          // Let interrupted tasks observe cancellation before dropping pending approvals, or an
-@@ -808,7 +1041,7 @@ impl Session {
+@@ -808,7 +1066,7 @@ impl Session {
              if reason == TurnAbortReason::Interrupted {
                  run_turn_interrupt_hooks(self, &turn_context, &turn_state).await;
              }
@@ -11573,7 +11835,7 @@ index 5bf41019d5..58dd703feb 100644
                  .await;
              EventMsg::TurnAborted(TurnAbortedEvent {
                  turn_id: Some(turn_context.sub_id.clone()),
-@@ -823,8 +1056,7 @@ impl Session {
+@@ -823,8 +1081,7 @@ impl Session {
                  .time_to_first_token_ms()
                  .await;
              let error = turn_context.terminal_error.lock().await.clone();

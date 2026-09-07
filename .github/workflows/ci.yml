@@ -152,30 +152,9 @@ jobs:
           name: bazel-module-lock
           path: codex-src/MODULE.bazel.lock
 
-      - name: Test goal-only compatibility baseline
-        run: |
-          goal_only="$RUNNER_TEMP/codex-goal-only"
-          commit="$(python -c 'import json; print(json.load(open("docs/provenance.json"))["commit"])')"
-          git init --quiet "$goal_only"
-          git -C "$goal_only" remote add origin https://github.com/openai/codex.git
-          git -C "$goal_only" fetch --quiet --depth=1 --filter=blob:none origin "$commit"
-          git -C "$goal_only" checkout --quiet --detach FETCH_HEAD
-          python - "$goal_only" <<'PY'
-          import sys
-          from pathlib import Path
-
-          from scripts.verify_provenance import apply_patch, patch_application
-
-          work = Path(sys.argv[1])
-          patch = Path("patches/goal-old-continuation.patch").resolve()
-          apply_patch(
-              work,
-              patch,
-              patch_application(patch),
-              fetch_preimages=True,
-          )
-          PY
-          cargo test --manifest-path "$goal_only/codex-rs/Cargo.toml" -p codex-goal-extension turn_error_
+      - name: Test integrated Goal continuation policy
+        working-directory: codex-src/codex-rs
+        run: cargo test --locked -p codex-goal-extension turn_error_
 
       - name: Check Shadow extension
         working-directory: codex-src/codex-rs

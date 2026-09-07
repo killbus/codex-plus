@@ -12431,8 +12431,19 @@ async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_
         "pending trigger work".to_owned(),
         /*trigger_turn*/ true,
     );
+    let trigger_start_options = codex_protocol::turn_input::TurnStartOptions {
+        turn_trigger: Some("agent_followup".to_owned()),
+        final_output_json_schema: Some(serde_json::json!({"type": "object"})),
+        service_tier: Some("priority".to_owned()),
+        parent_turn_id: Some("parent-turn".to_owned()),
+        root_turn_id: Some("root-turn".to_owned()),
+        cyber_access_program: Some(codex_protocol::turn_input::CyberAccessProgram::DaybreakBlue),
+    };
     sess.input_queue
-        .enqueue_mailbox_communication(trigger_communication.clone(), Default::default())
+        .enqueue_mailbox_communication(
+            trigger_communication.clone(),
+            trigger_start_options.clone(),
+        )
         .await;
 
     let gate = PendingWorkStartTestGate::default();
@@ -12497,7 +12508,7 @@ async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_
         Some((user_turn.sub_id.clone(), AutomaticTurnOrigin::Unspecified,))
     );
 
-    let (pending_input, _start_options) =
+    let (pending_input, start_options) =
         sess.input_queue.get_pending_input(&sess.active_turn).await;
     assert_eq!(
         pending_input.len(),
@@ -12533,6 +12544,21 @@ async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_
         pending_trigger_communication,
         Some(&trigger_communication),
         "stale pending-work startup must not drain trigger mailbox input"
+    );
+    assert_eq!(start_options.turn_trigger, trigger_start_options.turn_trigger);
+    assert_eq!(
+        start_options.final_output_json_schema,
+        trigger_start_options.final_output_json_schema
+    );
+    assert_eq!(start_options.service_tier, trigger_start_options.service_tier);
+    assert_eq!(
+        start_options.parent_turn_id,
+        trigger_start_options.parent_turn_id
+    );
+    assert_eq!(start_options.root_turn_id, trigger_start_options.root_turn_id);
+    assert_eq!(
+        start_options.cyber_access_program,
+        trigger_start_options.cyber_access_program
     );
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;

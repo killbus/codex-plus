@@ -4,6 +4,7 @@ use crate::state::TurnState;
 use codex_diagnostics::Gauge;
 use codex_diagnostics::GaugeGuard;
 use codex_history::ResponseItemEnvelope;
+use codex_protocol::AgentPath;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::InterAgentCommunication;
@@ -89,6 +90,13 @@ struct PendingMailboxCommunication {
     _diagnostics_guard: GaugeGuard,
 }
 
+pub(crate) struct PendingMailboxTurnStart {
+    pending_mail_count: usize,
+    pub(crate) has_trigger_turn: bool,
+    pub(crate) initiating_agent_path: Option<AgentPath>,
+    pub(crate) start_options: TurnStartOptions,
+}
+
 impl InputQueue {
     pub(crate) fn new() -> Self {
         let (activity_tx, _) = watch::channel(InputQueueActivity::Mailbox);
@@ -149,13 +157,9 @@ impl InputQueue {
             .any(|mail| mail.communication.trigger_turn)
     }
 
-    pub(crate) async fn drain_mailbox_input_items(&self) -> (Vec<TurnInput>, TurnStartOptions) {
-        let pending_mails = self
-            .mailbox_pending_mails
-            .lock()
-            .await
-            .drain(..)
-            .collect::<Vec<_>>();
+    fn pending_mailbox_turn_start(
+        pending_mails: &VecDeque<PendingMailboxCommunication>,
+    ) -> PendingMailboxTurnStart {
         // A later follow-up supersedes the earlier choice, including an omitted choice.
         let mut start_options = pending_mails
             .iter()
@@ -181,10 +185,57 @@ impl InputQueue {
                     .filter(|id| !id.trim().is_empty())
             })
             .map(str::to_string);
-        let items = pending_mails
-            .into_iter()
+        PendingMailboxTurnStart {
+            pending_mail_count: pending_mails.len(),
+            has_trigger_turn: pending_mails
+                .iter()
+                .any(|mail| mail.communication.trigger_turn),
+            initiating_agent_path: pending_mails
+                .iter()
+                .find(|mail| mail.communication.trigger_turn)
+                .map(|mail| mail.communication.author.clone()),
+            start_options,
+        }
+    }
+
+    pub(crate) async fn peek_pending_mailbox_turn_start(&self) -> PendingMailboxTurnStart {
+        let pending_mails = self.mailbox_pending_mails.lock().await;
+        Self::pending_mailbox_turn_start(&pending_mails)
+    }
+
+    fn drain_mailbox_input_items_prefix(
+        pending_mails: &mut VecDeque<PendingMailboxCommunication>,
+        pending_mail_count: usize,
+    ) -> Vec<TurnInput> {
+        assert!(
+            pending_mail_count <= pending_mails.len(),
+            "pending mailbox prefix changed before ownership transfer"
+        );
+        pending_mails
+            .drain(..pending_mail_count)
             .map(|mail| TurnInput::InterAgentCommunication(mail.communication))
-            .collect();
+            .collect()
+    }
+
+    pub(crate) async fn drain_mailbox_input_items_for_turn_start(
+        &self,
+        pending_turn_start: &PendingMailboxTurnStart,
+    ) -> Vec<TurnInput> {
+        let mut pending_mails = self.mailbox_pending_mails.lock().await;
+        Self::drain_mailbox_input_items_prefix(
+            &mut pending_mails,
+            pending_turn_start.pending_mail_count,
+        )
+    }
+
+    pub(crate) async fn drain_mailbox_input_items(&self) -> (Vec<TurnInput>, TurnStartOptions) {
+        let mut pending_mails = self.mailbox_pending_mails.lock().await;
+        let pending_turn_start = Self::pending_mailbox_turn_start(&pending_mails);
+        let items = Self::drain_mailbox_input_items_prefix(
+            &mut pending_mails,
+            pending_turn_start.pending_mail_count,
+        );
+        let start_options = pending_turn_start.start_options;
         (items, start_options)
     }
 
@@ -560,6 +611,65 @@ mod tests {
         assert_eq!(actual_mail_one, &mail_one);
         assert_eq!(actual_mail_two, &mail_two);
         assert!(!input_queue.has_pending_mailbox_items().await);
+    }
+
+    #[tokio::test]
+    async fn input_queue_snapshot_drains_only_observed_mailbox_prefix() {
+        let input_queue = InputQueue::new();
+        let first = make_mail(
+            AgentPath::root(),
+            AgentPath::try_from("/root/first").expect("agent path"),
+            "first",
+            /*trigger_turn*/ true,
+        );
+        let second = make_mail(
+            AgentPath::root(),
+            AgentPath::try_from("/root/second").expect("agent path"),
+            "second",
+            /*trigger_turn*/ true,
+        );
+        input_queue
+            .enqueue_mailbox_communication(
+                first.clone(),
+                TurnStartOptions {
+                    turn_trigger: Some("first".to_owned()),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let pending_turn_start = input_queue.peek_pending_mailbox_turn_start().await;
+        input_queue
+            .enqueue_mailbox_communication(
+                second.clone(),
+                TurnStartOptions {
+                    turn_trigger: Some("second".to_owned()),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+        let pending_input = input_queue
+            .drain_mailbox_input_items_for_turn_start(&pending_turn_start)
+            .await;
+        let [TurnInput::InterAgentCommunication(actual_first)] = pending_input.as_slice() else {
+            panic!("expected only the observed mailbox prefix");
+        };
+        assert_eq!(actual_first, &first);
+        assert_eq!(
+            pending_turn_start.start_options.turn_trigger.as_deref(),
+            Some("first")
+        );
+
+        let (remaining_input, remaining_start_options) =
+            input_queue.drain_mailbox_input_items().await;
+        let [TurnInput::InterAgentCommunication(actual_second)] = remaining_input.as_slice() else {
+            panic!("expected later mail to remain queued");
+        };
+        assert_eq!(actual_second, &second);
+        assert_eq!(
+            remaining_start_options.turn_trigger.as_deref(),
+            Some("second")
+        );
     }
 
     #[tokio::test]

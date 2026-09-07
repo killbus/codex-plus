@@ -212,6 +212,14 @@ every other terminal `CodexErrorInfo` leaves the Goal Active for idle
 continuation. Shadow applies directly after that patch and must not add a Goal
 error classifier or consecutive-failure counter.
 
+When an upstream release changes `workspace.package.version`, every source-less
+local workspace package entry in the imported `Cargo.lock` must record that same
+version. A lockfile copied from a release commit may still contain placeholder
+`0.0.0` versions; provenance can reproduce those bytes while `cargo --locked`
+correctly rejects them. Reconcile only package identity/version metadata proven
+to belong to local manifests, then regenerate the following integration patch
+and provenance from that accepted tree.
+
 ### 4. Validation & Error Matrix
 
 - `UsageLimitExceeded` -> inherited usage-limit state; no automatic next turn.
@@ -225,6 +233,9 @@ error classifier or consecutive-failure counter.
   `dead_code`.
 - Patch application, hash, or reconstructed manifest mismatch -> deterministic
   provenance failure; do not retry it as a network error.
+- Source-less local lock packages disagree with `workspace.package.version` ->
+  `cargo --locked` fails before behavioral tests; update all and only the proven
+  local package versions, then rebuild patch and provenance evidence.
 - Upstream fetch disconnect/429/5xx -> retry only the fetch boundary.
 
 ### 5. Good/Base/Bad Cases
@@ -246,6 +257,8 @@ error classifier or consecutive-failure counter.
 - Enable both Goals and Shadow in that integration test.
 - CI and release provenance commands use exactly the two ordered patches.
 - Verify the immutable Goal patch hash and reject any residual classifier/counter.
+- Parse `Cargo.lock` and local manifests to prove every source-less package maps
+  to a workspace package and uses the inherited workspace release version.
 - Statically assert that the integrated Goal runtime has no unreachable
   `TurnError` stop reason while `on_turn_error` still special-cases only
   `UsageLimitExceeded`.
@@ -259,6 +272,12 @@ circuit breaker.
 Correct: keep the imported Goal patch byte-for-byte unchanged, layer Shadow
 directly on it, and use behavior tests plus ordered provenance to prove both the
 policy and its reconstruction.
+
+Wrong: assume a reproducible imported `Cargo.lock` is usable with `--locked`
+without checking local package versions after a workspace release-version bump.
+
+Correct: prove the source-less entries correspond to local manifests, synchronize
+their inherited version only, and regenerate the downstream patch and hashes.
 
 ## Scenario: Native Shadow report delivery
 

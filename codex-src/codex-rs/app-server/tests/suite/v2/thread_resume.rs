@@ -3311,9 +3311,8 @@ async fn dropped_stream_goal_turn_error_starts_next_automatic_turn_with_shadow()
         responses::ev_completed("complete-goal"),
     ]);
     let done = create_final_assistant_message_sse_response("Done")?;
-    let dropped_after_handshake = |response_id| {
-        responses::sse(vec![responses::ev_response_created(response_id)])
-    };
+    let dropped_after_handshake =
+        |response_id| responses::sse(vec![responses::ev_response_created(response_id)]);
     let stream = |body| vec![StreamingSseChunk { gate: None, body }];
     let (server, _) = start_streaming_sse_server(vec![
         stream(create_goal),
@@ -3428,9 +3427,7 @@ async fn dropped_stream_goal_turn_error_starts_next_automatic_turn_with_shadow()
                         .and_then(|params| params.get("turn"))
                         .and_then(|turn| turn.get("id"))
                         .and_then(serde_json::Value::as_str)
-                        .is_some_and(|turn_id| {
-                            turn_id != turn.id && turn_id != continued.turn.id
-                        })
+                        .is_some_and(|turn_id| turn_id != turn.id && turn_id != continued.turn.id)
             },
         ),
     )
@@ -3539,10 +3536,7 @@ async fn run_transient_http_goal_turn_error(
     let config = std::fs::read_to_string(&config_path)?;
     std::fs::write(
         &config_path,
-        config.replace(
-            "request_max_retries = 0",
-            "request_max_retries = 1",
-        ),
+        config.replace("request_max_retries = 0", "request_max_retries = 1"),
     )?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -3648,9 +3642,7 @@ async fn run_transient_http_goal_turn_error(
                         .and_then(|params| params.get("turn"))
                         .and_then(|turn| turn.get("id"))
                         .and_then(serde_json::Value::as_str)
-                        .is_some_and(|turn_id| {
-                            turn_id != turn.id && turn_id != continued.turn.id
-                        })
+                        .is_some_and(|turn_id| turn_id != turn.id && turn_id != continued.turn.id)
             },
         ),
     )

@@ -3422,8 +3422,8 @@ async fn guardian_review_exhausts_three_failures_with_one_terminal_event() -> an
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn guardian_review_exhausts_transient_http_failures_with_one_terminal_event() -> anyhow::Result<()>
-{
+async fn guardian_review_exhausts_transient_http_failures_with_one_terminal_event()
+-> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;

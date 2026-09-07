@@ -25,7 +25,7 @@ Current integration state:
 - Pre-upgrade rollback commit: `632cc5b11a7a071bf5a3d45ccecfefa9a56ebcf5`.
 - Staging tree: `.trellis/.runtime/upgrade-staging`.
 - Staging base HEAD: `5352fbd14d09926a5217353f08a93c756c87c52a`.
-- Staged integration delta: 76 files, 5,187 insertions, and 85 deletions.
+- Staged integration delta: 76 files, 5,332 insertions, and 234 deletions.
 - Ordered patches: immutable Goal patch followed directly by the regenerated
   Shadow integration patch.
 
@@ -160,22 +160,49 @@ peeled source commit. Reconstruction uses this ordered chain:
    applied with deterministic three-way semantics using preimage commit
    `bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb`.
 2. `patches/shadow-mind.patch`, SHA-256
-   `08ba93f5cb9c622124d10c0ea7ea039308545a363731bef2c69ca778dff0cc6f`,
+   `3474f5f59eeb1e4615daf6d56c9e77c5d18e702fe0932fd14aa54ac9dbafe8d8`,
    applied directly.
 
 The source tree digest is
-`21637802d30dc44e44158b7a8a8914d4d8ac590d82650f56a0cf3aeedebf5fb9`;
+`175491a16f58fce62ba079906633868deed958b5aa88445c22a9e2032332a5ed`;
 the rebuilt digest is
-`cf015e793f897165d793eac2aff94d384c0ad036645abefcb8c777c675399d68`.
+`1ebffd1e56958e7d00c389f89fabcde2422407f16e00446326bdd17abb12bddd`.
 The only expected materialization differences are the three recorded `.vscode`
 files. The source-side Cargo lock digest is recorded independently under
-`source_file_sha256`.
+`source_file_sha256` as
+`3f1ff14f28ffc173e63d2323bc11ec5b73d3b5f994c168e10272733b3b39444a`.
 
 The exact local reconstruction completed successfully on 2026-09-06. The
 provenance unit suite passed 18 tests and the release artifact audit suite passed
 7 tests. Static checks also confirmed the immutable Goal hash, the Goal preimage
 reference allowlist, absence of stale `rust-v0.146.0-alpha.3` references in the
 active release surfaces, and clean non-vendored/staged diffs.
+
+## Failed CI run and corrective delta
+
+GitHub Actions run `34066769319` tested branch commit
+`9257a8622233dd3676d9733de29ac003349738ee` and failed all three required jobs:
+`Shadow runtime contracts`, `Rust checks`, and
+`Goal and Guardian retry contracts`. The logs expose two blocking causes before
+the intended Rust behavior tests could provide acceptance evidence:
+
+1. `cargo fmt --all -- --check` reported formatter output in exactly six Rust
+   files. The corrective diff applies the reported wrapping and import ordering
+   only; it contains no runtime-policy edit.
+2. Every `cargo test --locked` invocation stopped because Cargo wanted to update
+   `Cargo.lock`. Static lock analysis found exactly 150 source-less workspace
+   packages. Each corresponds to a local workspace manifest inheriting
+   `workspace.package.version`; the target workspace version is `0.153.4`, while
+   all 150 imported lock entries still recorded `0.0.0`. The corrective lock
+   delta changes exactly those 150 versions to `0.153.4`. It does not add, remove,
+   or retarget a dependency.
+
+The corrected staging index and `codex-src/codex-rs` tree are byte-identical
+apart from an ignored local `target` directory. The regenerated Shadow patch is
+the exact binary diff of the staging index against Goal-only commit
+`5352fbd14d09926a5217353f08a93c756c87c52a`; an independent regeneration and
+`cmp` check succeeded. A replacement CI run remains required because the failed
+run did not execute the full Rust acceptance surface.
 
 GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
 with `-D warnings`, app-server schema generation/drift, Bazel lock generation/

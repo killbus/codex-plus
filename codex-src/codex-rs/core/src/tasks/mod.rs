@@ -446,16 +446,20 @@ impl Session {
             TaskStartOwnership::Available => {
                 self.input_queue.get_pending_input(&self.active_turn).await
             }
-            TaskStartOwnership::IdleReservation(_) => {
-                (Vec::new(), codex_protocol::turn_input::TurnStartOptions::default())
-            }
+            TaskStartOwnership::IdleReservation(_) => (
+                Vec::new(),
+                codex_protocol::turn_input::TurnStartOptions::default(),
+            ),
             TaskStartOwnership::PendingWorkReservation(expected_turn_state) => {
                 let accepts_mailbox_delivery = expected_turn_state
                     .lock()
                     .await
                     .accepts_mailbox_delivery_for_current_turn();
                 if !accepts_mailbox_delivery {
-                    (Vec::new(), codex_protocol::turn_input::TurnStartOptions::default())
+                    (
+                        Vec::new(),
+                        codex_protocol::turn_input::TurnStartOptions::default(),
+                    )
                 } else {
                     let mut pending_items = self
                         .input_queue

@@ -8207,6 +8207,18 @@ index 929eab5392..5c54639e0a 100644
      move |forked_from_thread_id: ThreadId,
            options: StartThreadOptions|
            -> AgentSpawnFuture<'static, NewThread, CodexErr> {
+diff --git a/codex-rs/app-server/src/notification_media.rs b/codex-rs/app-server/src/notification_media.rs
+index 844a312705..b3cfd84008 100644
+--- a/codex-rs/app-server/src/notification_media.rs
++++ b/codex-rs/app-server/src/notification_media.rs
+@@ -206,6 +206,7 @@ fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
+         | ThreadItem::WebSearch(_)
+         | ThreadItem::ImageView { .. }
+         | ThreadItem::Sleep(_)
++        | ThreadItem::ShadowReport(_)
+         | ThreadItem::EnteredReviewMode { .. }
+         | ThreadItem::ExitedReviewMode { .. }
+         | ThreadItem::ContextCompaction { .. } => {}
 diff --git a/codex-rs/app-server/tests/suite/v2/thread_resume.rs b/codex-rs/app-server/tests/suite/v2/thread_resume.rs
 index a6f728deb1..633bf011b7 100644
 --- a/codex-rs/app-server/tests/suite/v2/thread_resume.rs
@@ -9601,17 +9613,17 @@ index 6d1953e3a2..3aaeebfe78 100644
              if let Some(network_policy_decider_session) = network_policy_decider_session {
                  let mut guard = network_policy_decider_session.write().await;
 diff --git a/codex-rs/core/src/session/tests.rs b/codex-rs/core/src/session/tests.rs
-index b5931b330e..b259ef3782 100644
+index b5931b330e..31bf8caab6 100644
 --- a/codex-rs/core/src/session/tests.rs
 +++ b/codex-rs/core/src/session/tests.rs
-@@ -7,6 +7,7 @@ use super::turn_context::TurnEnvironment;
+@@ -6,6 +6,7 @@ pub(crate) use super::step_settings::tests::update_selected_settings_for_test;
+ use super::turn_context::TurnEnvironment;
  use super::*;
  use crate::agents_md_manager::AgentsMdManager;
- use crate::compact::InitialContextInjection;
 +use crate::codex_thread::TryStartTurnIfIdleRejectionReason;
+ use crate::compact::InitialContextInjection;
  use crate::config::ConfigBuilder;
  use crate::config::ConfigOverrides;
- use crate::config::test_config;
 @@ -42,6 +43,9 @@ use codex_config::types::ToolSuggestDisabledTool;
  use codex_config::types::WindowsSandboxModeToml;
  use core_test_support::test_codex::TurnInputRequest as ExternalTurnInputRequest;
@@ -9711,7 +9723,7 @@ index b5931b330e..b259ef3782 100644
      });
      let per_turn_config =
          session.build_per_turn_config(&session_configuration, session_configuration.cwd().clone());
-@@ -11898,6 +11949,854 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
+@@ -11898,6 +11949,856 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
      assert_eq!(0, calls.load(std::sync::atomic::Ordering::SeqCst));
  }
  
@@ -10273,6 +10285,7 @@ index b5931b330e..b259ef3782 100644
 +    let user_pending_input = pending_input.iter().find_map(|input| match input {
 +        TurnInput::UserInput { content, client_id } => Some((content, client_id)),
 +        TurnInput::DisplayItem(_)
++        | TurnInput::FunctionCallOutput(_)
 +        | TurnInput::ResponseItem(_)
 +        | TurnInput::InterAgentCommunication(_) => None,
 +    });
@@ -10289,9 +10302,10 @@ index b5931b330e..b259ef3782 100644
 +    );
 +    let pending_trigger_communication = pending_input.iter().find_map(|input| match input {
 +        TurnInput::InterAgentCommunication(communication) => Some(communication),
-+        TurnInput::UserInput { .. } | TurnInput::DisplayItem(_) | TurnInput::ResponseItem(_) => {
-+            None
-+        }
++        TurnInput::UserInput { .. }
++        | TurnInput::DisplayItem(_)
++        | TurnInput::FunctionCallOutput(_)
++        | TurnInput::ResponseItem(_) => None,
 +    });
 +    assert_eq!(
 +        pending_trigger_communication,
@@ -10566,7 +10580,7 @@ index b5931b330e..b259ef3782 100644
  #[tokio::test]
  async fn abort_empty_active_turn_preserves_pending_input() {
      let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
-@@ -11925,12 +12824,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
+@@ -11925,12 +12826,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
      sess.abort_all_tasks(TurnAbortReason::Replaced).await;
  
      assert!(sess.active_turn.lock().await.is_none());
@@ -10587,7 +10601,7 @@ index b5931b330e..b259ef3782 100644
  }
  
  async fn set_total_token_usage(sess: &Session, total_token_usage: TokenUsage) {
-@@ -11973,20 +12874,23 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
+@@ -11973,20 +12876,23 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
          !sess.input_queue.has_pending_input(&sess.active_turn).await,
          "queue-only mailbox mail should stay buffered once the current turn emitted its answer"
      );
@@ -10618,7 +10632,7 @@ index b5931b330e..b259ef3782 100644
  }
  
  #[tokio::test]
-@@ -12072,13 +12976,17 @@ async fn active_turn_keeps_first_root_when_mail_coalesces() {
+@@ -12072,13 +12978,17 @@ async fn active_turn_keeps_first_root_when_mail_coalesces() {
              .await;
      }
  
@@ -10643,7 +10657,7 @@ index b5931b330e..b259ef3782 100644
      assert_eq!(
          tc.turn_metadata_state.root_turn_id().as_deref(),
          Some("root-a")
-@@ -12125,19 +13033,24 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
+@@ -12125,19 +13035,24 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
      .await;
      assert!(matches!(submission, TurnInputSubmission::Steered { .. }));
  
@@ -10679,7 +10693,7 @@ index b5931b330e..b259ef3782 100644
  }
  
  #[tokio::test]
-@@ -12181,19 +13094,24 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
+@@ -12181,19 +13096,24 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
          .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
          .await;
  
@@ -10715,7 +10729,7 @@ index b5931b330e..b259ef3782 100644
  }
  
  #[tokio::test]
-@@ -12246,10 +13164,13 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
+@@ -12246,10 +13166,13 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
  
      assert!(output.needs_follow_up);
      assert!(output.tool_future.is_some());

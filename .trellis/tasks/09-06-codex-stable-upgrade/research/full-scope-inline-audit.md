@@ -25,7 +25,7 @@ Current integration state:
 - Pre-upgrade rollback commit: `632cc5b11a7a071bf5a3d45ccecfefa9a56ebcf5`.
 - Staging tree: `.trellis/.runtime/upgrade-staging`.
 - Staging base HEAD: `5352fbd14d09926a5217353f08a93c756c87c52a`.
-- Staged integration delta: 82 files, 5,510 insertions, and 270 deletions.
+- Staged integration delta: 83 files, 5,513 insertions, and 270 deletions.
 - Ordered patches: immutable Goal patch followed directly by the regenerated
   Shadow integration patch.
 
@@ -160,13 +160,13 @@ peeled source commit. Reconstruction uses this ordered chain:
    applied with deterministic three-way semantics using preimage commit
    `bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb`.
 2. `patches/shadow-mind.patch`, SHA-256
-   `347283b5b37495cf2d7f25256d96922a97674012d8d43cbdfdb10551c85fb241`,
+   `8df949f057726149eef681533b2f463af01cbe3f219b61f5dd69318ef9525df5`,
    applied directly.
 
 The source tree digest is
-`1a49c2c0dfdf52327ce4aab3f959b8bcfc22f4debd32f7df8279b3c5dbc048d2`;
+`efdc5a4b7393b37d891da27664ac9e6b7254685201c5b593f5b44a5270da4b68`;
 the rebuilt digest is
-`3216c0360d7e188e86f5926ef1208cd2d40947fbc3f797e6417fa5830767ef83`.
+`7a256f2af6c1094ecbd5ad3e855074dda9eed8800d243fbb8a0058f20470156c`.
 The only expected materialization differences are the three recorded `.vscode`
 files. The source-side Cargo lock digest is recorded independently under
 `source_file_sha256` as
@@ -227,7 +227,7 @@ feature.
 After these corrections, the Goal patch hash remains
 `eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6`. The
 regenerated Shadow patch hash is
-`347283b5b37495cf2d7f25256d96922a97674012d8d43cbdfdb10551c85fb241`. The
+`8df949f057726149eef681533b2f463af01cbe3f219b61f5dd69318ef9525df5`. The
 18 provenance unit tests, seven release-audit unit tests, exact two-patch
 reconstruction check, stale-reference check, and diff checks pass locally. A
 new remote CI run is still required for compilation and runtime evidence.
@@ -251,6 +251,23 @@ bytes were applied and compared byte-for-byte. Guardian-labelled CI coverage
 remains only shared-upstream regression coverage for a touched retry/error
 boundary. Guardian is not a fork migration feature, patch objective, or separate
 upgrade capability. A replacement CI run is required for compiled behavior.
+
+GitHub Actions run `34073233510` tested branch commit
+`fecc7c42a7e1d2f7aec92b6022c7d6a6ba2753e6` on 2026-09-07. All three jobs
+reported the same single rustfmt import-order correction in
+`core/src/session/tests.rs`. Compilation then exposed two missing explicit
+`TurnInput::FunctionCallOutput` no-op branches in one pending-input ownership
+test and one missing `ThreadItem::ShadowReport` no-op branch in app-server media
+filtering. The latter is correct because the typed Shadow report contains text
+only and has no image or audio payload to remove. No additional compiler error
+class appeared in the completed Goal/retry, Rust, or Shadow-runtime job logs.
+
+The corrective delta changes only those three exhaustive matches plus the
+formatter-requested import order. Both source trees are byte-identical for all
+83 staged integration files, and an independently emitted cached diff matches
+`patches/shadow-mind.patch` byte-for-byte. The Goal patch hash remains unchanged;
+the regenerated Shadow patch and tree hashes are the values recorded above. A
+replacement CI run is required before any runtime or release acceptance claim.
 
 GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
 with `-D warnings`, app-server schema generation/drift, Bazel lock generation/

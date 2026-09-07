@@ -36,17 +36,17 @@
   ],
   "patch_sha256": [
     "eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6",
-    "347283b5b37495cf2d7f25256d96922a97674012d8d43cbdfdb10551c85fb241"
+    "8df949f057726149eef681533b2f463af01cbe3f219b61f5dd69318ef9525df5"
   ],
   "patches": [
     "patches/goal-old-continuation.patch",
     "patches/shadow-mind.patch"
   ],
-  "rebuilt_tree_sha256": "3216c0360d7e188e86f5926ef1208cd2d40947fbc3f797e6417fa5830767ef83",
+  "rebuilt_tree_sha256": "7a256f2af6c1094ecbd5ad3e855074dda9eed8800d243fbb8a0058f20470156c",
   "source_file_sha256": {
     "codex-rs/Cargo.lock": "3f1ff14f28ffc173e63d2323bc11ec5b73d3b5f994c168e10272733b3b39444a"
   },
-  "source_tree_sha256": "1a49c2c0dfdf52327ce4aab3f959b8bcfc22f4debd32f7df8279b3c5dbc048d2",
+  "source_tree_sha256": "efdc5a4b7393b37d891da27664ac9e6b7254685201c5b593f5b44a5270da4b68",
   "tag": "rust-v0.153.4",
   "upstream": "https://github.com/openai/codex.git"
 }

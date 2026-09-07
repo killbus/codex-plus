@@ -6,8 +6,8 @@ pub(crate) use super::step_settings::tests::update_selected_settings_for_test;
 use super::turn_context::TurnEnvironment;
 use super::*;
 use crate::agents_md_manager::AgentsMdManager;
-use crate::compact::InitialContextInjection;
 use crate::codex_thread::TryStartTurnIfIdleRejectionReason;
+use crate::compact::InitialContextInjection;
 use crate::config::ConfigBuilder;
 use crate::config::ConfigOverrides;
 use crate::config::test_config;
@@ -12507,6 +12507,7 @@ async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_
     let user_pending_input = pending_input.iter().find_map(|input| match input {
         TurnInput::UserInput { content, client_id } => Some((content, client_id)),
         TurnInput::DisplayItem(_)
+        | TurnInput::FunctionCallOutput(_)
         | TurnInput::ResponseItem(_)
         | TurnInput::InterAgentCommunication(_) => None,
     });
@@ -12523,9 +12524,10 @@ async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_
     );
     let pending_trigger_communication = pending_input.iter().find_map(|input| match input {
         TurnInput::InterAgentCommunication(communication) => Some(communication),
-        TurnInput::UserInput { .. } | TurnInput::DisplayItem(_) | TurnInput::ResponseItem(_) => {
-            None
-        }
+        TurnInput::UserInput { .. }
+        | TurnInput::DisplayItem(_)
+        | TurnInput::FunctionCallOutput(_)
+        | TurnInput::ResponseItem(_) => None,
     });
     assert_eq!(
         pending_trigger_communication,

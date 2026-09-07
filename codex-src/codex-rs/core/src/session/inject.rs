@@ -264,7 +264,7 @@ impl Session {
         };
 
         if self.input_queue.has_trigger_turn_mailbox_items().await {
-            self.clear_reserved_idle_turn(&turn_state).await;
+            self.clear_automatic_idle_reservation(&turn_state).await;
             self.maybe_start_turn_for_pending_work().await;
             return Err(TryStartTurnIfIdleError::new(
                 TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
@@ -278,8 +278,8 @@ impl Session {
                 automatic_turn_origin,
             )
             .await;
-        if turn_context.mode == ModeKind::Plan {
-            self.clear_reserved_idle_turn(&turn_state).await;
+        if turn_context.mode() == ModeKind::Plan {
+            self.clear_automatic_idle_reservation(&turn_state).await;
             self.maybe_start_turn_for_pending_work().await;
             return Err(TryStartTurnIfIdleError::new(
                 TryStartTurnIfIdleRejectionReason::PlanMode,
@@ -289,7 +289,7 @@ impl Session {
         self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
             .await;
         if self.input_queue.has_trigger_turn_mailbox_items().await {
-            self.clear_reserved_idle_turn(&turn_state).await;
+            self.clear_automatic_idle_reservation(&turn_state).await;
             self.maybe_start_turn_for_pending_work().await;
             return Err(TryStartTurnIfIdleError::new(
                 TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
@@ -305,7 +305,7 @@ impl Session {
             })
         };
         if !still_reserved {
-            self.clear_reserved_idle_turn(&turn_state).await;
+            self.clear_automatic_idle_reservation(&turn_state).await;
             return Err(TryStartTurnIfIdleError::new(
                 TryStartTurnIfIdleRejectionReason::Busy,
                 input,
@@ -341,7 +341,7 @@ impl Session {
             self.input_queue
                 .take_pending_input_for_turn_state(turn_state.as_ref())
                 .await;
-            self.clear_reserved_idle_turn(&turn_state).await;
+            self.clear_automatic_idle_reservation(&turn_state).await;
             return Err(TryStartTurnIfIdleError::new(
                 TryStartTurnIfIdleRejectionReason::Busy,
                 rejected_input,
@@ -350,7 +350,10 @@ impl Session {
         Ok(())
     }
 
-    async fn clear_reserved_idle_turn(&self, turn_state: &Arc<tokio::sync::Mutex<TurnState>>) {
+    async fn clear_automatic_idle_reservation(
+        &self,
+        turn_state: &Arc<tokio::sync::Mutex<TurnState>>,
+    ) {
         let mut active_turn_guard = self.active_turn.lock().await;
         if let Some(active_turn) = active_turn_guard.as_ref()
             && active_turn.idle_reservation

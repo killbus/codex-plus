@@ -19,7 +19,7 @@ use tokio::sync::watch;
 static PENDING_MAILBOX_MESSAGES: Gauge = Gauge::new("core.mailbox.pending");
 
 /// Input consumed by a regular turn.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TurnInput {
     UserInput {
         content: Vec<UserInput>,
@@ -390,7 +390,11 @@ mod tests {
         let value = serde_json::json!({"ResponseItem": item});
 
         assert_eq!(serde_json::to_value(&input).unwrap(), value);
-        assert_eq!(serde_json::from_value::<TurnInput>(value).unwrap(), input);
+        let TurnInput::ResponseItem(decoded) = serde_json::from_value(value).unwrap() else {
+            panic!("expected response item");
+        };
+        assert_eq!(decoded.item, item);
+        assert!(decoded.metadata.is_none());
 
         let annotated = TurnInput::ResponseItem(ResponseItemEnvelope {
             item: ResponseItem::Other,

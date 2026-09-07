@@ -12,7 +12,6 @@ use arc_swap::ArcSwap;
 use codex_core_plugins::PluginCommandAttribution;
 use codex_core_plugins::ResolvedPluginMetricsOperation;
 use codex_core_plugins::TrustedPluginRoots;
-use codex_core_skills::HostSkillsSnapshot;
 use codex_exec_server::ExecutorFileSystem;
 use codex_extension_api::AutomaticTurnOrigin;
 use codex_file_system::FileSystemSandboxContext;

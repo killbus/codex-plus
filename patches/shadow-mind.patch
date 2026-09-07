@@ -3312,7 +3312,7 @@ index 4964905418..7d98af4102 100644
              sess.record_annotated_conversation_items(turn_context, vec![item])
                  .await;
 diff --git a/codex-rs/core/src/session/inject.rs b/codex-rs/core/src/session/inject.rs
-index 6c103f266c..645d7cecc5 100644
+index 6c103f266c..b5cc916bce 100644
 --- a/codex-rs/core/src/session/inject.rs
 +++ b/codex-rs/core/src/session/inject.rs
 @@ -1,12 +1,66 @@
@@ -3382,7 +3382,7 @@ index 6c103f266c..645d7cecc5 100644
      /// Returns the input if there is no active turn to inject into.
      #[expect(
          clippy::await_holding_invalid_type,
-@@ -64,6 +118,249 @@ impl Session {
+@@ -64,6 +118,252 @@ impl Session {
          Ok(())
      }
  
@@ -3532,7 +3532,7 @@ index 6c103f266c..645d7cecc5 100644
 +        };
 +
 +        if self.input_queue.has_trigger_turn_mailbox_items().await {
-+            self.clear_reserved_idle_turn(&turn_state).await;
++            self.clear_automatic_idle_reservation(&turn_state).await;
 +            self.maybe_start_turn_for_pending_work().await;
 +            return Err(TryStartTurnIfIdleError::new(
 +                TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
@@ -3546,8 +3546,8 @@ index 6c103f266c..645d7cecc5 100644
 +                automatic_turn_origin,
 +            )
 +            .await;
-+        if turn_context.mode == ModeKind::Plan {
-+            self.clear_reserved_idle_turn(&turn_state).await;
++        if turn_context.mode() == ModeKind::Plan {
++            self.clear_automatic_idle_reservation(&turn_state).await;
 +            self.maybe_start_turn_for_pending_work().await;
 +            return Err(TryStartTurnIfIdleError::new(
 +                TryStartTurnIfIdleRejectionReason::PlanMode,
@@ -3557,7 +3557,7 @@ index 6c103f266c..645d7cecc5 100644
 +        self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
 +            .await;
 +        if self.input_queue.has_trigger_turn_mailbox_items().await {
-+            self.clear_reserved_idle_turn(&turn_state).await;
++            self.clear_automatic_idle_reservation(&turn_state).await;
 +            self.maybe_start_turn_for_pending_work().await;
 +            return Err(TryStartTurnIfIdleError::new(
 +                TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
@@ -3573,7 +3573,7 @@ index 6c103f266c..645d7cecc5 100644
 +            })
 +        };
 +        if !still_reserved {
-+            self.clear_reserved_idle_turn(&turn_state).await;
++            self.clear_automatic_idle_reservation(&turn_state).await;
 +            return Err(TryStartTurnIfIdleError::new(
 +                TryStartTurnIfIdleRejectionReason::Busy,
 +                input,
@@ -3609,7 +3609,7 @@ index 6c103f266c..645d7cecc5 100644
 +            self.input_queue
 +                .take_pending_input_for_turn_state(turn_state.as_ref())
 +                .await;
-+            self.clear_reserved_idle_turn(&turn_state).await;
++            self.clear_automatic_idle_reservation(&turn_state).await;
 +            return Err(TryStartTurnIfIdleError::new(
 +                TryStartTurnIfIdleRejectionReason::Busy,
 +                rejected_input,
@@ -3618,7 +3618,10 @@ index 6c103f266c..645d7cecc5 100644
 +        Ok(())
 +    }
 +
-+    async fn clear_reserved_idle_turn(&self, turn_state: &Arc<tokio::sync::Mutex<TurnState>>) {
++    async fn clear_automatic_idle_reservation(
++        &self,
++        turn_state: &Arc<tokio::sync::Mutex<TurnState>>,
++    ) {
 +        let mut active_turn_guard = self.active_turn.lock().await;
 +        if let Some(active_turn) = active_turn_guard.as_ref()
 +            && active_turn.idle_reservation
@@ -3633,7 +3636,7 @@ index 6c103f266c..645d7cecc5 100644
      #[expect(
          clippy::await_holding_invalid_type,
 diff --git a/codex-rs/core/src/session/input_queue.rs b/codex-rs/core/src/session/input_queue.rs
-index e6bd3ba388..b73af52005 100644
+index e6bd3ba388..fe5a8fc4db 100644
 --- a/codex-rs/core/src/session/input_queue.rs
 +++ b/codex-rs/core/src/session/input_queue.rs
 @@ -4,6 +4,7 @@ use crate::state::TurnState;
@@ -3644,6 +3647,15 @@ index e6bd3ba388..b73af52005 100644
  use codex_protocol::models::ResponseItem;
  use codex_protocol::protocol::InterAgentCommunication;
  use codex_protocol::turn_input::TurnStartOptions;
+@@ -18,7 +19,7 @@ use tokio::sync::watch;
+ static PENDING_MAILBOX_MESSAGES: Gauge = Gauge::new("core.mailbox.pending");
+ 
+ /// Input consumed by a regular turn.
+-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
++#[derive(Clone, Debug, Serialize, Deserialize)]
+ pub enum TurnInput {
+     UserInput {
+         content: Vec<UserInput>,
 @@ -28,6 +29,7 @@ pub enum TurnInput {
      // Preserve the existing serialized format while carrying injection API metadata
      // through the in-memory queue.
@@ -3652,6 +3664,19 @@ index e6bd3ba388..b73af52005 100644
      InterAgentCommunication(InterAgentCommunication),
  }
  
+@@ -388,7 +390,11 @@ mod tests {
+         let value = serde_json::json!({"ResponseItem": item});
+ 
+         assert_eq!(serde_json::to_value(&input).unwrap(), value);
+-        assert_eq!(serde_json::from_value::<TurnInput>(value).unwrap(), input);
++        let TurnInput::ResponseItem(decoded) = serde_json::from_value(value).unwrap() else {
++            panic!("expected response item");
++        };
++        assert_eq!(decoded.item, item);
++        assert!(decoded.metadata.is_none());
+ 
+         let annotated = TurnInput::ResponseItem(ResponseItemEnvelope {
+             item: ResponseItem::Other,
 diff --git a/codex-rs/core/src/session/review.rs b/codex-rs/core/src/session/review.rs
 index cf7392ca26..abe62e3b3d 100644
 --- a/codex-rs/core/src/session/review.rs
@@ -4842,10 +4867,20 @@ index b5931b330e..cfea54f4d9 100644
  
  #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 diff --git a/codex-rs/core/src/session/turn.rs b/codex-rs/core/src/session/turn.rs
-index f7c42680c2..1cd2e70d08 100644
+index f7c42680c2..59cf3cb4cf 100644
 --- a/codex-rs/core/src/session/turn.rs
 +++ b/codex-rs/core/src/session/turn.rs
-@@ -1003,7 +1003,8 @@ async fn track_turn_resolved_config_analytics(
+@@ -669,7 +669,8 @@ fn turn_user_input(input: &[TurnInput]) -> Vec<UserInput> {
+         .iter()
+         .filter_map(|item| match item {
+             TurnInput::UserInput { content, .. } => Some(content.as_slice()),
+-            TurnInput::ResponseItem(_)
++            TurnInput::DisplayItem(_)
++            | TurnInput::ResponseItem(_)
+             | TurnInput::FunctionCallOutput(_)
+             | TurnInput::InterAgentCommunication(_) => None,
+         })
+@@ -1003,7 +1004,8 @@ async fn track_turn_resolved_config_analytics(
                  .iter()
                  .filter_map(|item| match item {
                      TurnInput::UserInput { content, .. } => Some(content.as_slice()),
@@ -4856,20 +4891,18 @@ index f7c42680c2..1cd2e70d08 100644
                      | TurnInput::InterAgentCommunication(_) => None,
                  })
 diff --git a/codex-rs/core/src/session/turn_context.rs b/codex-rs/core/src/session/turn_context.rs
-index e5a371e9d0..d67b95ccd7 100644
+index e5a371e9d0..12ba3d817c 100644
 --- a/codex-rs/core/src/session/turn_context.rs
 +++ b/codex-rs/core/src/session/turn_context.rs
-@@ -12,7 +12,9 @@ use arc_swap::ArcSwap;
- use codex_core_plugins::PluginCommandAttribution;
+@@ -13,6 +13,7 @@ use codex_core_plugins::PluginCommandAttribution;
  use codex_core_plugins::ResolvedPluginMetricsOperation;
  use codex_core_plugins::TrustedPluginRoots;
-+use codex_core_skills::HostSkillsSnapshot;
  use codex_exec_server::ExecutorFileSystem;
 +use codex_extension_api::AutomaticTurnOrigin;
  use codex_file_system::FileSystemSandboxContext;
  use codex_model_provider::SharedModelProvider;
  use codex_protocol::SessionId;
-@@ -187,6 +189,7 @@ impl std::fmt::Debug for TurnEnvironment {
+@@ -187,6 +188,7 @@ impl std::fmt::Debug for TurnEnvironment {
  pub(crate) struct NewTurnContextOptions {
      pub(crate) final_output_json_schema: Option<Value>,
      pub(crate) cyber_access_program: Option<CyberAccessProgram>,
@@ -4877,7 +4910,7 @@ index e5a371e9d0..d67b95ccd7 100644
  }
  
  /// The context needed for a single turn of the thread.
-@@ -216,6 +219,7 @@ pub struct TurnContext {
+@@ -216,6 +218,7 @@ pub struct TurnContext {
      pub(crate) history_mode: ThreadHistoryMode,
      pub(crate) parent_thread_id: Option<ThreadId>,
      pub(crate) originator: String,
@@ -4885,7 +4918,7 @@ index e5a371e9d0..d67b95ccd7 100644
      pub(crate) environments: TurnEnvironmentSnapshot,
      /// The session's absolute working directory. All relative paths provided
      /// by the model as well as sandbox policies are resolved against this path
-@@ -525,6 +529,7 @@ impl TurnContext {
+@@ -525,6 +528,7 @@ impl TurnContext {
              history_mode: self.history_mode,
              parent_thread_id: self.parent_thread_id,
              originator: self.originator.clone(),
@@ -4893,7 +4926,7 @@ index e5a371e9d0..d67b95ccd7 100644
              environments: self.environments.clone(),
              #[allow(deprecated)]
              cwd: self.cwd.clone(),
-@@ -797,6 +802,7 @@ impl Session {
+@@ -797,6 +801,7 @@ impl Session {
              history_mode: session_configuration.history_mode,
              parent_thread_id: session_configuration.parent_thread_id,
              originator: session_configuration.originator.clone(),
@@ -4901,7 +4934,7 @@ index e5a371e9d0..d67b95ccd7 100644
              environments,
              #[allow(deprecated)]
              cwd,
-@@ -1022,6 +1028,7 @@ impl Session {
+@@ -1022,6 +1027,7 @@ impl Session {
          );
          turn_context.code_mode_available = self.services.code_mode_service.is_available();
          turn_context.extension_data.insert(trusted_plugin_roots);
@@ -4909,7 +4942,7 @@ index e5a371e9d0..d67b95ccd7 100644
          turn_context.realtime_active = self.conversation.running_state().await.is_some();
  
          turn_context.final_output_json_schema = options.final_output_json_schema;
-@@ -1097,6 +1104,21 @@ impl Session {
+@@ -1097,6 +1103,21 @@ impl Session {
              .await
      }
  
@@ -4932,7 +4965,7 @@ index e5a371e9d0..d67b95ccd7 100644
          &self,
          sub_id: String,
 diff --git a/codex-rs/core/src/session/turn_input.rs b/codex-rs/core/src/session/turn_input.rs
-index 2882931bca..01e55d0741 100644
+index 2882931bca..d8c2efa739 100644
 --- a/codex-rs/core/src/session/turn_input.rs
 +++ b/codex-rs/core/src/session/turn_input.rs
 @@ -18,6 +18,7 @@ use super::turn_context::TurnContext;
@@ -5051,7 +5084,56 @@ index 2882931bca..01e55d0741 100644
      match mode {
          TurnInputMode::StartOrSteer => start_or_steer(session, request, submission_id).await,
          TurnInputMode::StartIfIdle => {
-@@ -565,6 +653,13 @@ impl Session {
+@@ -366,7 +454,7 @@ async fn start_if_idle(
+     };
+ 
+     if session.input_queue.has_trigger_turn_mailbox_items().await {
+-        session.clear_reserved_idle_turn(&turn_state).await;
++        session.clear_submission_turn_reservation(&turn_state).await;
+         session.maybe_start_turn_for_pending_work().await;
+         return Ok(TurnInputSubmission::NotSubmitted {
+             reason: NotSubmittedReason::PendingTriggerTurn,
+@@ -376,7 +464,7 @@ async fn start_if_idle(
+     let settings = match PreparedTurnInputSettings::prepare(session, thread_settings, start).await {
+         Ok(settings) => settings,
+         Err(error) => {
+-            session.clear_reserved_idle_turn(&turn_state).await;
++            session.clear_submission_turn_reservation(&turn_state).await;
+             return Err(error);
+         }
+     };
+@@ -386,13 +474,13 @@ async fn start_if_idle(
+     {
+         Ok(Some(turn_context)) => turn_context,
+         Ok(None) => {
+-            session.clear_reserved_idle_turn(&turn_state).await;
++            session.clear_submission_turn_reservation(&turn_state).await;
+             return Ok(TurnInputSubmission::NotSubmitted {
+                 reason: NotSubmittedReason::PlanMode,
+             });
+         }
+         Err(error) => {
+-            session.clear_reserved_idle_turn(&turn_state).await;
++            session.clear_submission_turn_reservation(&turn_state).await;
+             return Err(error);
+         }
+     };
+@@ -531,9 +619,13 @@ impl Session {
+         }
+     }
+ 
+-    async fn clear_reserved_idle_turn(&self, turn_state: &Arc<tokio::sync::Mutex<TurnState>>) {
++    async fn clear_submission_turn_reservation(
++        &self,
++        turn_state: &Arc<tokio::sync::Mutex<TurnState>>,
++    ) {
+         let mut active_turn_guard = self.active_turn.lock().await;
+         if let Some(active_turn) = active_turn_guard.as_ref()
++            && !active_turn.idle_reservation
+             && active_turn.task.is_none()
+             && Arc::ptr_eq(&active_turn.turn_state, turn_state)
+         {
+@@ -565,6 +657,13 @@ impl Session {
          let Some(active_task) = active_turn.task.as_ref() else {
              return Err(NotSubmittedReason::NoActiveTurn);
          };
@@ -5089,10 +5171,12 @@ index c61e6431e9..b7b1dcdc84 100644
      }
  }
 diff --git a/codex-rs/core/src/tasks/lifecycle.rs b/codex-rs/core/src/tasks/lifecycle.rs
-index cde3fc7d72..0c83717c21 100644
+index cde3fc7d72..c44181f938 100644
 --- a/codex-rs/core/src/tasks/lifecycle.rs
 +++ b/codex-rs/core/src/tasks/lifecycle.rs
-@@ -3,6 +3,7 @@ use codex_extension_api::ThreadIdleCause;
+@@ -1,8 +1,8 @@
+-use codex_extension_api::ExtensionData;
+ use codex_extension_api::ThreadIdleCause;
  use codex_protocol::protocol::CodexErrorInfo;
  use codex_protocol::protocol::TokenUsage;
  use codex_protocol::protocol::TurnAbortReason;
@@ -5100,7 +5184,7 @@ index cde3fc7d72..0c83717c21 100644
  
  use crate::session::session::Session;
  use crate::session::turn_context::TurnContext;
-@@ -13,6 +14,7 @@ impl Session {
+@@ -13,6 +13,7 @@ impl Session {
          turn_context: &TurnContext,
          token_usage_at_turn_start: &TokenUsage,
      ) {
@@ -5108,7 +5192,7 @@ index cde3fc7d72..0c83717c21 100644
          let collaboration_mode = turn_context.collaboration_mode();
          for contributor in self.services.extensions.turn_lifecycle_contributors() {
              contributor
-@@ -28,7 +30,12 @@ impl Session {
+@@ -28,7 +29,12 @@ impl Session {
          }
      }
  
@@ -5122,7 +5206,7 @@ index cde3fc7d72..0c83717c21 100644
          for contributor in self.services.extensions.turn_lifecycle_contributors() {
              contributor
                  .on_turn_stop(codex_extension_api::TurnStopInput {
-@@ -56,10 +63,17 @@ impl Session {
+@@ -56,10 +62,17 @@ impl Session {
              return;
          }
  
@@ -5140,7 +5224,7 @@ index cde3fc7d72..0c83717c21 100644
                      session_store: &self.services.session_extension_data,
                      thread_store: &self.services.thread_extension_data,
                  })
-@@ -70,8 +84,13 @@ impl Session {
+@@ -70,8 +83,13 @@ impl Session {
      pub(super) async fn emit_turn_abort_lifecycle(
          &self,
          reason: TurnAbortReason,
@@ -5156,10 +5240,18 @@ index cde3fc7d72..0c83717c21 100644
              contributor
                  .on_turn_abort(codex_extension_api::TurnAbortInput {
 diff --git a/codex-rs/core/src/tasks/mod.rs b/codex-rs/core/src/tasks/mod.rs
-index 5bf41019d5..385d015aeb 100644
+index 5bf41019d5..58dd703feb 100644
 --- a/codex-rs/core/src/tasks/mod.rs
 +++ b/codex-rs/core/src/tasks/mod.rs
-@@ -267,7 +267,110 @@ where
+@@ -9,6 +9,7 @@ use std::time::Duration;
+ use std::time::Instant;
+ 
+ use codex_diagnostics::Gauge;
++use codex_extension_api::AutomaticTurnOrigin;
+ use codex_extension_api::ThreadIdleCause;
+ use futures::future::BoxFuture;
+ use tokio::select;
+@@ -267,7 +268,110 @@ where
      }
  }
  
@@ -5270,7 +5362,7 @@ index 5bf41019d5..385d015aeb 100644
      pub async fn spawn_task<T: SessionTask>(
          self: &Arc<Self>,
          turn_context: Arc<TurnContext>,
-@@ -285,9 +388,129 @@ impl Session {
+@@ -285,9 +389,129 @@ impl Session {
          input: Vec<TurnInput>,
          task: T,
      ) {
@@ -5400,7 +5492,7 @@ index 5bf41019d5..385d015aeb 100644
          let started_at = Instant::now();
          let turn_started_at_unix_ms = turn_context
              .turn_timing_state
-@@ -306,8 +529,6 @@ impl Session {
+@@ -306,8 +530,6 @@ impl Session {
              .lock()
              .await
              .clear_turn(&turn_context.sub_id);
@@ -5409,7 +5501,7 @@ index 5bf41019d5..385d015aeb 100644
          if turn_context.turn_metadata_state.root_turn_id().is_none()
              && let Some(root_turn_id) = start_options.root_turn_id
          {
-@@ -315,12 +536,13 @@ impl Session {
+@@ -315,12 +537,13 @@ impl Session {
                  .turn_metadata_state
                  .set_root_turn_id(root_turn_id);
          }
@@ -5429,7 +5521,7 @@ index 5bf41019d5..385d015aeb 100644
          turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
          self.input_queue
              .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
-@@ -328,9 +550,6 @@ impl Session {
+@@ -328,9 +551,6 @@ impl Session {
          self.emit_turn_start_lifecycle(turn_context.as_ref(), &token_usage_at_turn_start)
              .await;
  
@@ -5439,7 +5531,7 @@ index 5bf41019d5..385d015aeb 100644
          let agent_execution_guard = self.services.agent_control.execution_guard(
              turn_context.multi_agent_version,
              &turn_context.session_source,
-@@ -409,6 +628,8 @@ impl Session {
+@@ -409,6 +629,8 @@ impl Session {
              _timer: timer,
          };
          turn.task = Some(running_task);
@@ -5448,7 +5540,7 @@ index 5bf41019d5..385d015aeb 100644
      }
  
      /// Returns whether an extension has marked this thread as durably asleep.
-@@ -456,8 +677,10 @@ impl Session {
+@@ -456,8 +678,10 @@ impl Session {
              if active_turn.is_some() {
                  return;
              }
@@ -5461,7 +5553,15 @@ index 5bf41019d5..385d015aeb 100644
          };
  
          let (input, mut start_options) =
-@@ -504,7 +727,15 @@ impl Session {
+@@ -477,6 +701,7 @@ impl Session {
+                 NewTurnContextOptions {
+                     final_output_json_schema: start_options.final_output_json_schema,
+                     cyber_access_program: start_options.cyber_access_program,
++                    automatic_turn_origin: AutomaticTurnOrigin::Unspecified,
+                 },
+             )
+             .await;
+@@ -504,7 +729,15 @@ impl Session {
          self.input_queue
              .extend_pending_input_for_turn_state(turn_state.as_ref(), input)
              .await;
@@ -5478,7 +5578,7 @@ index 5bf41019d5..385d015aeb 100644
              .await;
      }
  
-@@ -526,7 +757,7 @@ impl Session {
+@@ -526,7 +759,7 @@ impl Session {
          }
  
          if let Some(turn_context) = turn_context.as_deref() {
@@ -5487,7 +5587,7 @@ index 5bf41019d5..385d015aeb 100644
                  .await;
          }
          if let Some(active_turn) = active_turn_to_clear {
-@@ -573,7 +804,7 @@ impl Session {
+@@ -573,7 +806,7 @@ impl Session {
                  .await;
          }
          if let Some(turn_context) = turn_context.as_deref() {
@@ -5496,7 +5596,7 @@ index 5bf41019d5..385d015aeb 100644
                  .await;
          }
          // Let interrupted tasks observe cancellation before dropping pending approvals, or an
-@@ -808,7 +1039,7 @@ impl Session {
+@@ -808,7 +1041,7 @@ impl Session {
              if reason == TurnAbortReason::Interrupted {
                  run_turn_interrupt_hooks(self, &turn_context, &turn_state).await;
              }
@@ -5505,7 +5605,7 @@ index 5bf41019d5..385d015aeb 100644
                  .await;
              EventMsg::TurnAborted(TurnAbortedEvent {
                  turn_id: Some(turn_context.sub_id.clone()),
-@@ -823,8 +1054,7 @@ impl Session {
+@@ -823,8 +1056,7 @@ impl Session {
                  .time_to_first_token_ms()
                  .await;
              let error = turn_context.terminal_error.lock().await.clone();

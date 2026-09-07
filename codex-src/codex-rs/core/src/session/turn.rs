@@ -669,7 +669,8 @@ fn turn_user_input(input: &[TurnInput]) -> Vec<UserInput> {
         .iter()
         .filter_map(|item| match item {
             TurnInput::UserInput { content, .. } => Some(content.as_slice()),
-            TurnInput::ResponseItem(_)
+            TurnInput::DisplayItem(_)
+            | TurnInput::ResponseItem(_)
             | TurnInput::FunctionCallOutput(_)
             | TurnInput::InterAgentCommunication(_) => None,
         })

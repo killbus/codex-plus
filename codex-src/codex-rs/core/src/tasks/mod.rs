@@ -9,6 +9,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use codex_diagnostics::Gauge;
+use codex_extension_api::AutomaticTurnOrigin;
 use codex_extension_api::ThreadIdleCause;
 use futures::future::BoxFuture;
 use tokio::select;
@@ -700,6 +701,7 @@ impl Session {
                 NewTurnContextOptions {
                     final_output_json_schema: start_options.final_output_json_schema,
                     cyber_access_program: start_options.cyber_access_program,
+                    automatic_turn_origin: AutomaticTurnOrigin::Unspecified,
                 },
             )
             .await;

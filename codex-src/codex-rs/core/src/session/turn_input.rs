@@ -454,7 +454,7 @@ async fn start_if_idle(
     };
 
     if session.input_queue.has_trigger_turn_mailbox_items().await {
-        session.clear_reserved_idle_turn(&turn_state).await;
+        session.clear_submission_turn_reservation(&turn_state).await;
         session.maybe_start_turn_for_pending_work().await;
         return Ok(TurnInputSubmission::NotSubmitted {
             reason: NotSubmittedReason::PendingTriggerTurn,
@@ -464,7 +464,7 @@ async fn start_if_idle(
     let settings = match PreparedTurnInputSettings::prepare(session, thread_settings, start).await {
         Ok(settings) => settings,
         Err(error) => {
-            session.clear_reserved_idle_turn(&turn_state).await;
+            session.clear_submission_turn_reservation(&turn_state).await;
             return Err(error);
         }
     };
@@ -474,13 +474,13 @@ async fn start_if_idle(
     {
         Ok(Some(turn_context)) => turn_context,
         Ok(None) => {
-            session.clear_reserved_idle_turn(&turn_state).await;
+            session.clear_submission_turn_reservation(&turn_state).await;
             return Ok(TurnInputSubmission::NotSubmitted {
                 reason: NotSubmittedReason::PlanMode,
             });
         }
         Err(error) => {
-            session.clear_reserved_idle_turn(&turn_state).await;
+            session.clear_submission_turn_reservation(&turn_state).await;
             return Err(error);
         }
     };
@@ -619,9 +619,13 @@ impl Session {
         }
     }
 
-    async fn clear_reserved_idle_turn(&self, turn_state: &Arc<tokio::sync::Mutex<TurnState>>) {
+    async fn clear_submission_turn_reservation(
+        &self,
+        turn_state: &Arc<tokio::sync::Mutex<TurnState>>,
+    ) {
         let mut active_turn_guard = self.active_turn.lock().await;
         if let Some(active_turn) = active_turn_guard.as_ref()
+            && !active_turn.idle_reservation
             && active_turn.task.is_none()
             && Arc::ptr_eq(&active_turn.turn_state, turn_state)
         {

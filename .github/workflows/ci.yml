@@ -62,7 +62,7 @@ jobs:
         run: cargo test --locked -p codex-shadow-extension cancelled_same_epoch_delivery_worker_cannot_drain_replacement_report
 
   retry-contracts:
-    name: Goal and Guardian retry contracts
+    name: Goal retry and upstream regression contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -131,7 +131,7 @@ jobs:
       - name: Generate app-server schema fixtures
         id: generate_app_server_schema
         working-directory: codex-src/codex-rs
-        run: just write-app-server-schema
+        run: python app-server-protocol/scripts/write_schema_fixtures.py
 
       - name: Upload generated app-server schemas
         if: always() && steps.generate_app_server_schema.outcome == 'success'

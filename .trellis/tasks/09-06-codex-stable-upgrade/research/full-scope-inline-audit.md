@@ -204,6 +204,34 @@ the exact binary diff of the staging index against Goal-only commit
 `cmp` check succeeded. A replacement CI run remains required because the failed
 run did not execute the full Rust acceptance surface.
 
+GitHub Actions run `34068522523` then tested branch commit
+`36326735d7823fd1fbe81b9388a452c6eea4055a` on 2026-09-07. Formatting and
+provenance passed, but the three runtime/Rust jobs failed before behavioral
+assertions. The Rust compiler exposed six integration defects: a stale duplicate
+skills import, one field-style collaboration-mode access that must use the
+upstream accessor, a missing `automatic_turn_origin`, two same-named cleanup
+helpers with different reservation ownership, an invalid broad `PartialEq`
+derive after adding `DisplayItem`, and one non-exhaustive `TurnInput` match. It
+also reported one stale lifecycle import. The corrective delta preserves the two
+reservation types as separately named helpers and narrows the serialization
+test instead of adding equality to upstream `TurnItem`.
+
+The same run found that upstream `0.153.4` has no `write_schema_fixtures` binary
+target even though its `just` recipe invokes that name. CI now calls the
+authoritative Python fixture generator directly. The retry job is renamed to
+`Goal retry and upstream regression contracts`: Guardian remains an upstream
+capability and is tested only because the fork's shared bounded-retry error
+mapping can affect that upstream caller. It is not treated as a migrated fork
+feature.
+
+After these corrections, the Goal patch hash remains
+`eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6`. The
+regenerated Shadow patch hash is
+`f3b2834284e53909b0e25bd76e28ec4a807a9f3083a94924bb3820ef9cee6ed7`. The
+18 provenance unit tests, seven release-audit unit tests, exact two-patch
+reconstruction check, stale-reference check, and diff checks pass locally. A
+new remote CI run is still required for compilation and runtime evidence.
+
 GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
 with `-D warnings`, app-server schema generation/drift, Bazel lock generation/
 drift, and the six-target CLI release. The configured targets are Windows x64,

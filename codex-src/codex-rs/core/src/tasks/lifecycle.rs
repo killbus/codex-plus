@@ -1,4 +1,3 @@
-use codex_extension_api::ExtensionData;
 use codex_extension_api::ThreadIdleCause;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::TokenUsage;

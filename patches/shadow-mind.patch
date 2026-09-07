@@ -9623,6 +9623,18 @@ index e6bd3ba388..9901f41e92 100644
      }
  
      #[tokio::test]
+diff --git a/codex-rs/core/src/session/mod.rs b/codex-rs/core/src/session/mod.rs
+index 91300365bb..f580023777 100644
+--- a/codex-rs/core/src/session/mod.rs
++++ b/codex-rs/core/src/session/mod.rs
+@@ -251,6 +251,7 @@ use self::code_mode_warning::unsupported_code_mode_warning;
+ use self::handlers::submission_dispatch_span;
+ use self::handlers::submission_loop;
+ pub(crate) use self::input_queue::InputQueueActivity;
++pub(crate) use self::input_queue::PendingMailboxTurnStart;
+ pub(crate) use self::input_queue::TurnInput;
+ pub(crate) use self::input_queue::TurnInputQueue;
+ use self::review::spawn_review_thread;
 diff --git a/codex-rs/core/src/session/review.rs b/codex-rs/core/src/session/review.rs
 index cf7392ca26..abe62e3b3d 100644
 --- a/codex-rs/core/src/session/review.rs
@@ -9765,7 +9777,7 @@ index 6d1953e3a2..3aaeebfe78 100644
              if let Some(network_policy_decider_session) = network_policy_decider_session {
                  let mut guard = network_policy_decider_session.write().await;
 diff --git a/codex-rs/core/src/session/tests.rs b/codex-rs/core/src/session/tests.rs
-index b5931b330e..4b90edf33e 100644
+index b5931b330e..3397e53dfb 100644
 --- a/codex-rs/core/src/session/tests.rs
 +++ b/codex-rs/core/src/session/tests.rs
 @@ -6,6 +6,7 @@ pub(crate) use super::step_settings::tests::update_selected_settings_for_test;
@@ -9875,7 +9887,7 @@ index b5931b330e..4b90edf33e 100644
      });
      let per_turn_config =
          session.build_per_turn_config(&session_configuration, session_configuration.cwd().clone());
-@@ -11898,6 +11949,882 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
+@@ -11898,6 +11949,888 @@ async fn thread_idle_lifecycle_waits_for_trigger_turn_mailbox_work() {
      assert_eq!(0, calls.load(std::sync::atomic::Ordering::SeqCst));
  }
  
@@ -10370,10 +10382,7 @@ index b5931b330e..4b90edf33e 100644
 +        cyber_access_program: Some(codex_protocol::turn_input::CyberAccessProgram::DaybreakBlue),
 +    };
 +    sess.input_queue
-+        .enqueue_mailbox_communication(
-+            trigger_communication.clone(),
-+            trigger_start_options.clone(),
-+        )
++        .enqueue_mailbox_communication(trigger_communication.clone(), trigger_start_options.clone())
 +        .await;
 +
 +    let gate = PendingWorkStartTestGate::default();
@@ -10475,17 +10484,26 @@ index b5931b330e..4b90edf33e 100644
 +        Some(&trigger_communication),
 +        "stale pending-work startup must not drain trigger mailbox input"
 +    );
-+    assert_eq!(start_options.turn_trigger, trigger_start_options.turn_trigger);
++    assert_eq!(
++        start_options.turn_trigger,
++        trigger_start_options.turn_trigger
++    );
 +    assert_eq!(
 +        start_options.final_output_json_schema,
 +        trigger_start_options.final_output_json_schema
 +    );
-+    assert_eq!(start_options.service_tier, trigger_start_options.service_tier);
++    assert_eq!(
++        start_options.service_tier,
++        trigger_start_options.service_tier
++    );
 +    assert_eq!(
 +        start_options.parent_turn_id,
 +        trigger_start_options.parent_turn_id
 +    );
-+    assert_eq!(start_options.root_turn_id, trigger_start_options.root_turn_id);
++    assert_eq!(
++        start_options.root_turn_id,
++        trigger_start_options.root_turn_id
++    );
 +    assert_eq!(
 +        start_options.cyber_access_program,
 +        trigger_start_options.cyber_access_program
@@ -10758,7 +10776,7 @@ index b5931b330e..4b90edf33e 100644
  #[tokio::test]
  async fn abort_empty_active_turn_preserves_pending_input() {
      let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
-@@ -11925,12 +12852,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
+@@ -11925,12 +12858,14 @@ async fn abort_empty_active_turn_preserves_pending_input() {
      sess.abort_all_tasks(TurnAbortReason::Replaced).await;
  
      assert!(sess.active_turn.lock().await.is_none());
@@ -10779,7 +10797,7 @@ index b5931b330e..4b90edf33e 100644
  }
  
  async fn set_total_token_usage(sess: &Session, total_token_usage: TokenUsage) {
-@@ -11973,20 +12902,23 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
+@@ -11973,20 +12908,23 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
          !sess.input_queue.has_pending_input(&sess.active_turn).await,
          "queue-only mailbox mail should stay buffered once the current turn emitted its answer"
      );
@@ -10810,7 +10828,7 @@ index b5931b330e..4b90edf33e 100644
  }
  
  #[tokio::test]
-@@ -12072,13 +13004,17 @@ async fn active_turn_keeps_first_root_when_mail_coalesces() {
+@@ -12072,13 +13010,17 @@ async fn active_turn_keeps_first_root_when_mail_coalesces() {
              .await;
      }
  
@@ -10835,7 +10853,7 @@ index b5931b330e..4b90edf33e 100644
      assert_eq!(
          tc.turn_metadata_state.root_turn_id().as_deref(),
          Some("root-a")
-@@ -12125,19 +13061,24 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
+@@ -12125,19 +13067,24 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
      .await;
      assert!(matches!(submission, TurnInputSubmission::Steered { .. }));
  
@@ -10871,7 +10889,7 @@ index b5931b330e..4b90edf33e 100644
  }
  
  #[tokio::test]
-@@ -12181,19 +13122,24 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
+@@ -12181,19 +13128,24 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
          .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
          .await;
  
@@ -10907,7 +10925,7 @@ index b5931b330e..4b90edf33e 100644
  }
  
  #[tokio::test]
-@@ -12246,10 +13192,13 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
+@@ -12246,10 +13198,13 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
  
      assert!(output.needs_follow_up);
      assert!(output.tool_future.is_some());
@@ -11386,7 +11404,7 @@ index cde3fc7d72..c44181f938 100644
              contributor
                  .on_turn_abort(codex_extension_api::TurnAbortInput {
 diff --git a/codex-rs/core/src/tasks/mod.rs b/codex-rs/core/src/tasks/mod.rs
-index 5bf41019d5..4bbc395d23 100644
+index 5bf41019d5..fe6068c65b 100644
 --- a/codex-rs/core/src/tasks/mod.rs
 +++ b/codex-rs/core/src/tasks/mod.rs
 @@ -9,6 +9,7 @@ use std::time::Duration;
@@ -11413,7 +11431,7 @@ index 5bf41019d5..4bbc395d23 100644
 +    Available,
 +    PendingWorkReservation {
 +        turn_state: Arc<tokio::sync::Mutex<TurnState>>,
-+        pending_turn_start: crate::session::input_queue::PendingMailboxTurnStart,
++        pending_turn_start: crate::session::PendingMailboxTurnStart,
 +    },
 +    IdleReservation(Arc<tokio::sync::Mutex<TurnState>>),
 +}

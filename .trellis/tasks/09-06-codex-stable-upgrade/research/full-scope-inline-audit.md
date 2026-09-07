@@ -25,7 +25,7 @@ Current integration state:
 - Pre-upgrade rollback commit: `632cc5b11a7a071bf5a3d45ccecfefa9a56ebcf5`.
 - Staging tree: `.trellis/.runtime/upgrade-staging`.
 - Staging base HEAD: `5352fbd14d09926a5217353f08a93c756c87c52a`.
-- Staged integration delta: 83 files, 5,513 insertions, and 270 deletions.
+- Staged integration delta: 84 files, 5,711 insertions, and 300 deletions.
 - Ordered patches: immutable Goal patch followed directly by the regenerated
   Shadow integration patch.
 
@@ -160,13 +160,13 @@ peeled source commit. Reconstruction uses this ordered chain:
    applied with deterministic three-way semantics using preimage commit
    `bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb`.
 2. `patches/shadow-mind.patch`, SHA-256
-   `6cfa8b36c644ff9476e648f176ad9bc5c468ddd2459c444b80afd856deeb4e97`,
+   `f2a2cfb90ff225048de4bfeb9e60d1f2c22263a7471035208bbe0f1bb8e89137`,
    applied directly.
 
 The source tree digest is
-`b6121fe9065f4abd5cbaa6b191c0908858bd4efd94ee41d62ad2d3328b7737b7`;
+`b5037593461af45d642aee5f2c954b9541c0f304908b036d288b4e6380090111`;
 the rebuilt digest is
-`0ae02b83366b67cd77bbd5d23a15efde7679e41d3b2a0d1256c493f1a4997e74`.
+`85ee99690aca1c0212dbfcb9440dda69c7345758dc69fd81168331a600905732`.
 The only expected materialization differences are the three recorded `.vscode`
 files. The source-side Cargo lock digest is recorded independently under
 `source_file_sha256` as
@@ -286,6 +286,28 @@ The obsolete CI step that built and tested an intermediate Goal-only tree was
 also removed. CI now tests `codex-goal-extension` continuation policy against
 the final integrated `codex-src/codex-rs` tree, which is the artifact actually
 shipped and includes the required Goal/Shadow compatibility cleanup.
+
+GitHub Actions run `34077690289` tested branch commit
+`571898866eda6f4cd700d33d7a442e2ec289e59b` on 2026-09-07. Rustfmt requested
+only wrapping changes in `core/src/session/tests.rs`; those exact changes were
+applied. Every named Guardian, Goal, and Shadow runtime step was then blocked by
+the same compiler error before behavior execution: `tasks` named
+`session::input_queue::PendingMailboxTurnStart`, but `input_queue` is a private
+implementation module. This is not evidence of three independent behavior
+regressions. The corrective delta narrowly re-exports
+`PendingMailboxTurnStart` from the crate-visible `session` facade and changes
+`tasks` to use that path. The type and all fields retain their existing
+`pub(crate)` or narrower visibility; no Guardian, Goal, retry, or Shadow policy
+changed.
+
+The failure class is a cross-layer contract and change-propagation gap: a new
+ownership token crossed the `session`/`tasks` boundary without an explicit
+facade path, and static source checks could not prove compilation under the
+project's remote-only Rust policy. The backend quality specification now records
+the narrow crate-visible re-export rule. The regenerated Shadow patch is an
+exact cached staging diff, all 84 staged integration files match `codex-src`,
+and the local provenance and release-audit suites pass. A replacement CI run is
+still required for compilation and runtime evidence.
 
 GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
 with `-D warnings`, app-server schema generation/drift, Bazel lock generation/

@@ -322,6 +322,12 @@ Messages that arrive after the observation remain queued for normal active-turn
 delivery or a later turn; they must not be attached to context built from the
 older snapshot.
 
+When this ownership token crosses from `session` into a sibling module such as
+`tasks`, expose the token through the crate-visible `session` facade. A sibling
+module must not name the private `session::input_queue` implementation module.
+The narrow re-export preserves encapsulation while allowing the compiler to
+validate the cross-module ownership handoff.
+
 ### 4. Validation & Error Matrix
 
 - Accepted current idle epoch with no pending work -> one visible report and one
@@ -345,7 +351,7 @@ older snapshot.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: TUI shows `Shadow · Reviewer` and the accepted report, then the main
+- Good: TUI shows `Shadow - Reviewer` and the accepted report, then the main
   Agent replies; replay shows the same report in the same relative position.
 - Base: a Goal automatic continuation remains eligible for Shadow scheduling.
 - Bad: parse `[shadow:reviewer]` to determine origin, render the report as a user
@@ -385,6 +391,14 @@ metadata that were computed before it existed.
 Correct: carry the observed `PendingMailboxTurnStart` through reservation
 validation and drain only its recorded prefix during the final ownership
 transfer.
+
+Wrong: make a sibling module refer directly to
+`session::input_queue::PendingMailboxTurnStart` while `input_queue` remains
+private; every focused runtime test then fails at compilation before exercising
+its contract.
+
+Correct: re-export only `PendingMailboxTurnStart` as `pub(crate)` from
+`session`, and have sibling modules use that facade path.
 
 ## Forbidden Patterns
 

@@ -273,7 +273,7 @@ enum TaskStartOwnership {
     Available,
     PendingWorkReservation {
         turn_state: Arc<tokio::sync::Mutex<TurnState>>,
-        pending_turn_start: crate::session::input_queue::PendingMailboxTurnStart,
+        pending_turn_start: crate::session::PendingMailboxTurnStart,
     },
     IdleReservation(Arc<tokio::sync::Mutex<TurnState>>),
 }

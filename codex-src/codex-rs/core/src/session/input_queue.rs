@@ -549,13 +549,16 @@ mod tests {
             .enqueue_mailbox_communication(mail_two.clone(), Default::default())
             .await;
 
-        assert_eq!(
-            input_queue.drain_mailbox_input_items().await.0,
-            vec![
-                TurnInput::InterAgentCommunication(mail_one),
-                TurnInput::InterAgentCommunication(mail_two)
-            ]
-        );
+        let pending_input = input_queue.drain_mailbox_input_items().await.0;
+        let [
+            TurnInput::InterAgentCommunication(actual_mail_one),
+            TurnInput::InterAgentCommunication(actual_mail_two),
+        ] = pending_input.as_slice()
+        else {
+            panic!("expected two mailbox communications");
+        };
+        assert_eq!(actual_mail_one, &mail_one);
+        assert_eq!(actual_mail_two, &mail_two);
         assert!(!input_queue.has_pending_mailbox_items().await);
     }
 

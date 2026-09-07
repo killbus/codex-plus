@@ -3250,8 +3250,8 @@ async fn guardian_review_retries_http_429_then_approves() -> anyhow::Result<()> 
     let (outcome, metadata) = run_guardian_review_session_for_test(
         Arc::clone(&session),
         Arc::clone(&turn),
-        guardian_shell_request("shell-rate-limit-retry"),
-        /*retry_reason*/ None,
+        guardian_exec_command_request("shell-rate-limit-retry"),
+        ApprovalRequestReasons::default(),
         guardian_output_schema(),
         /*external_cancel*/ None,
         /*max_attempts*/ 3,

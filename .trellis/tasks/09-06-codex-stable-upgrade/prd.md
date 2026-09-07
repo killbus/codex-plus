@@ -184,8 +184,11 @@ six-target CLI release contract.
 - [ ] AC9: The full GitHub Actions CI workflow is green on the upgrade branch,
   followed by a green six-target CLI release dry run or equivalent artifact
   validation before merge.
-- [ ] AC10: The final diff contains no unrelated product changes and documents
-  rollback to the pre-upgrade commit.
+- [ ] AC10: The final diff contains no unrelated product changes, documents
+  rollback to the pre-upgrade commit, and enters `main` as exactly one squashed
+  commit named `feat: upgrade Codex baseline to 0.153.4`. Development checkpoint
+  and corrective `fix:` commits may remain on the upgrade branch but do not enter
+  `main` independently.
 - [ ] AC11: If agents are used, dispatch records prove every
   implementation/research/check agent had its persisted Goal set through the
   standard mechanism before dispatch, that each Goal contained the required retry

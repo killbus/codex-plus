@@ -7,6 +7,7 @@ use super::turn_context::TurnEnvironment;
 use super::*;
 use crate::agents_md_manager::AgentsMdManager;
 use crate::compact::InitialContextInjection;
+use crate::codex_thread::TryStartTurnIfIdleRejectionReason;
 use crate::config::ConfigBuilder;
 use crate::config::ConfigOverrides;
 use crate::config::test_config;
@@ -157,6 +158,7 @@ use codex_protocol::protocol::HistoryPosition;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::NetworkApprovalProtocol;
+use codex_protocol::protocol::NonSteerableTurnKind;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::RateLimitWindow;
 use codex_protocol::protocol::RealtimeAudioFrame;
@@ -6671,6 +6673,9 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         fork_persistence: ForkPersistence::Copied,
         forked_from_ordinal_exclusive: None,
         next_internal_sub_id: AtomicU64::new(0),
+        client_input_reservations: AtomicU64::new(0),
+        idle_epoch: AtomicU64::new(0),
+        last_completed_turn: Mutex::new(None),
     };
     let per_turn_config =
         session.build_per_turn_config(&session_configuration, session_configuration.cwd().clone());
@@ -8971,6 +8976,9 @@ where
         fork_persistence: ForkPersistence::Copied,
         forked_from_ordinal_exclusive: None,
         next_internal_sub_id: AtomicU64::new(0),
+        client_input_reservations: AtomicU64::new(0),
+        idle_epoch: AtomicU64::new(0),
+        last_completed_turn: Mutex::new(None),
     });
     let per_turn_config =
         session.build_per_turn_config(&session_configuration, session_configuration.cwd().clone());
@@ -11972,6 +11980,7 @@ async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
         sess.input_queue
             .get_pending_input(&sess.active_turn)
             .await
+            .0
             .is_empty()
     );
     assert!(!drain_contains_item_lifecycle(&rx, &display_item));
@@ -11986,7 +11995,8 @@ async fn try_start_turn_if_idle_rejects_plan_mode_without_injecting() {
     collaboration_mode.mode = ModeKind::Plan;
     {
         let mut state = sess.state.lock().await;
-        state.session_configuration.collaboration_mode = collaboration_mode;
+        Arc::make_mut(&mut state.session_configuration.step_settings).collaboration_mode =
+            collaboration_mode;
     }
 
     let item = user_message("synthetic idle input");
@@ -12002,6 +12012,7 @@ async fn try_start_turn_if_idle_rejects_plan_mode_without_injecting() {
         sess.input_queue
             .get_pending_input(&sess.active_turn)
             .await
+            .0
             .is_empty()
     );
 }
@@ -12010,13 +12021,16 @@ async fn try_start_turn_if_idle_rejects_plan_mode_without_injecting() {
 async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting() {
     let (sess, _tc, rx) = make_session_and_context_with_rx().await;
     sess.input_queue
-        .enqueue_mailbox_communication(InterAgentCommunication::new(
-            AgentPath::root(),
-            AgentPath::root(),
-            Vec::new(),
-            "pending trigger".to_string(),
-            /*trigger_turn*/ true,
-        ))
+        .enqueue_mailbox_communication(
+            InterAgentCommunication::new(
+                AgentPath::root(),
+                AgentPath::root(),
+                Vec::new(),
+                "pending trigger".to_string(),
+                /*trigger_turn*/ true,
+            ),
+            Default::default(),
+        )
         .await;
 
     let item = user_message("synthetic idle input");
@@ -12066,6 +12080,7 @@ async fn try_start_turn_if_idle_rejects_active_review_turn_without_injecting() {
         sess.input_queue
             .get_pending_input(&sess.active_turn)
             .await
+            .0
             .is_empty()
     );
 
@@ -12203,7 +12218,10 @@ async fn try_start_turn_if_idle_with_origin_orders_shadow_item_and_rejects_dupli
 async fn idle_reservation_cannot_be_overwritten_by_concurrent_spawn_task() {
     let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
     let user_turn = sess
-        .new_default_turn_with_sub_id("concurrent-user-turn".to_owned())
+        .new_default_turn_with_sub_id_and_origin(
+            "concurrent-user-turn".to_owned(),
+            AutomaticTurnOrigin::Unspecified,
+        )
         .await;
     let gate = super::inject::IdleStartTestGate::default();
     sess.install_idle_start_test_gate(gate.clone());
@@ -12431,7 +12449,10 @@ async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_
         .expect("pending-work startup should reserve before installation");
 
     let user_turn = sess
-        .new_default_turn_with_sub_id("user-replacement".to_owned())
+        .new_default_turn_with_sub_id_and_origin(
+            "user-replacement".to_owned(),
+            AutomaticTurnOrigin::Unspecified,
+        )
         .await;
     sess.spawn_task(
         Arc::clone(&user_turn),
@@ -12476,7 +12497,8 @@ async fn pending_work_start_does_not_steal_user_pending_input_after_reservation_
         Some((user_turn.sub_id.clone(), AutomaticTurnOrigin::Unspecified,))
     );
 
-    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
+    let (pending_input, _start_options) =
+        sess.input_queue.get_pending_input(&sess.active_turn).await;
     assert_eq!(
         pending_input.len(),
         2,
@@ -12739,7 +12761,12 @@ async fn steer_input_rejects_non_regular_turns() {
             }],
             client_id: None,
         }];
-        let turn_context = sess.new_default_turn_with_sub_id("turn".to_string()).await;
+        let turn_context = sess
+            .new_default_turn_with_sub_id_and_origin(
+                "turn".to_string(),
+                AutomaticTurnOrigin::Unspecified,
+            )
+            .await;
         sess.spawn_task(
             turn_context,
             input,
@@ -12804,7 +12831,7 @@ async fn abort_empty_active_turn_preserves_pending_input() {
     let [TurnInput::ResponseItem(actual_pending_item)] = pending_input.as_slice() else {
         panic!("expected one pending response item");
     };
-    assert_eq!(actual_pending_item, &pending_item);
+    assert_eq!(&actual_pending_item.item, &pending_item);
 }
 
 async fn set_total_token_usage(sess: &Session, total_token_usage: TokenUsage) {
@@ -12851,12 +12878,14 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
         sess.input_queue
             .get_pending_input(&sess.active_turn)
             .await
+            .0
             .is_empty()
     );
 
     sess.abort_all_tasks(TurnAbortReason::Replaced).await;
 
-    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
+    let (pending_input, _start_options) =
+        sess.input_queue.get_pending_input(&sess.active_turn).await;
     let [TurnInput::InterAgentCommunication(actual_communication)] = pending_input.as_slice()
     else {
         panic!("expected one pending mailbox communication");
@@ -12947,13 +12976,17 @@ async fn active_turn_keeps_first_root_when_mail_coalesces() {
             .await;
     }
 
-    assert_eq!(
-        (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
-        vec![
-            TurnInput::InterAgentCommunication(first),
-            TurnInput::InterAgentCommunication(second),
-        ]
-    );
+    let (pending_input, _start_options) =
+        sess.input_queue.get_pending_input(&sess.active_turn).await;
+    let [
+        TurnInput::InterAgentCommunication(actual_first),
+        TurnInput::InterAgentCommunication(actual_second),
+    ] = pending_input.as_slice()
+    else {
+        panic!("expected two pending mailbox communications");
+    };
+    assert_eq!(actual_first, &first);
+    assert_eq!(actual_second, &second);
     assert_eq!(
         tc.turn_metadata_state.root_turn_id().as_deref(),
         Some("root-a")
@@ -13000,7 +13033,8 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
     .await;
     assert!(matches!(submission, TurnInputSubmission::Steered { .. }));
 
-    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
+    let (pending_input, _start_options) =
+        sess.input_queue.get_pending_input(&sess.active_turn).await;
     let [
         TurnInput::UserInput { content, client_id },
         TurnInput::InterAgentCommunication(actual_communication),
@@ -13060,7 +13094,8 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
         .await;
 
-    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
+    let (pending_input, _start_options) =
+        sess.input_queue.get_pending_input(&sess.active_turn).await;
     let [
         TurnInput::UserInput { content, client_id },
         TurnInput::InterAgentCommunication(actual_communication),
@@ -13129,7 +13164,8 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
 
     assert!(output.needs_follow_up);
     assert!(output.tool_future.is_some());
-    let pending_input = sess.input_queue.get_pending_input(&sess.active_turn).await;
+    let (pending_input, _start_options) =
+        sess.input_queue.get_pending_input(&sess.active_turn).await;
     let [TurnInput::InterAgentCommunication(actual_communication)] = pending_input.as_slice()
     else {
         panic!("expected one pending mailbox communication");

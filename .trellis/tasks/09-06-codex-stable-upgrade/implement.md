@@ -117,6 +117,11 @@
 - If no compliant pre-dispatch Goal operation exists, verify inline mode was
   active for the full implementation/check cycle and that no agent IDs were
   created.
+- Retain reviewable checkpoint commits on `upgrade/codex-0.153.4` while remote
+  validation is in progress. After all acceptance gates pass, integrate the full
+  range from `632cc5b11a7a071bf5a3d45ccecfefa9a56ebcf5` into `main` as exactly
+  one squashed commit: `feat: upgrade Codex baseline to 0.153.4`. Do not carry
+  any upgrade-internal `fix:` or checkpoint commit into `main` separately.
 
 ## Local validation commands
 

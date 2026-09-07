@@ -234,13 +234,13 @@ async fn start_only_rejects_active_turn_without_injecting() {
         },
         submission
     );
-    assert_eq!(
-        Vec::<TurnInput>::new(),
+    assert!(
         session
             .input_queue
             .get_pending_input(&session.active_turn)
             .await
             .0
+            .is_empty()
     );
 
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
@@ -293,13 +293,13 @@ async fn recovery_rejects_active_turn_without_injecting_or_applying_settings() {
             .value(),
         original_approval_policy
     );
-    assert_eq!(
+    assert!(
         session
             .input_queue
             .get_pending_input(&session.active_turn)
             .await
-            .0,
-        Vec::<TurnInput>::new()
+            .0
+            .is_empty()
     );
 
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
@@ -372,13 +372,13 @@ async fn start_only_rejects_current_plan_before_validating_settings() {
     ));
     assert_eq!(session.thread_settings_snapshot().await, desired_settings);
     assert!(session.active_turn.lock().await.is_none());
-    assert_eq!(
-        Vec::<TurnInput>::new(),
+    assert!(
         session
             .input_queue
             .get_pending_input(&session.active_turn)
             .await
             .0
+            .is_empty()
     );
 }
 
@@ -629,13 +629,13 @@ async fn automatic_admission_rechecks_plan_mode_without_committing_sparse_settin
         }
     }
 
-    assert_eq!(
+    assert!(
         session
             .input_queue
             .get_pending_input(&session.active_turn)
             .await
-            .0,
-        Vec::<TurnInput>::new()
+            .0
+            .is_empty()
     );
 
     // The rejected candidate is valid and would have real runtime effects if
@@ -719,13 +719,13 @@ async fn admission_revalidates_constraints_before_committing(kind: TurnStartKind
     );
     assert_eq!(session.thread_settings_snapshot().await, desired_settings);
     assert!(session.active_turn.lock().await.is_none());
-    assert_eq!(
+    assert!(
         session
             .input_queue
             .get_pending_input(&session.active_turn)
             .await
-            .0,
-        Vec::<TurnInput>::new()
+            .0
+            .is_empty()
     );
 }
 

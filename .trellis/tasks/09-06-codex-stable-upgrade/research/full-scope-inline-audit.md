@@ -1,6 +1,6 @@
 # Full-scope inline audit
 
-Audit date: 2026-09-06
+Audit date: 2026-09-07
 
 ## Status and method
 
@@ -25,7 +25,7 @@ Current integration state:
 - Pre-upgrade rollback commit: `632cc5b11a7a071bf5a3d45ccecfefa9a56ebcf5`.
 - Staging tree: `.trellis/.runtime/upgrade-staging`.
 - Staging base HEAD: `5352fbd14d09926a5217353f08a93c756c87c52a`.
-- Staged integration delta: 76 files, 5,332 insertions, and 234 deletions.
+- Staged integration delta: 82 files, 5,510 insertions, and 270 deletions.
 - Ordered patches: immutable Goal patch followed directly by the regenerated
   Shadow integration patch.
 
@@ -160,19 +160,19 @@ peeled source commit. Reconstruction uses this ordered chain:
    applied with deterministic three-way semantics using preimage commit
    `bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb`.
 2. `patches/shadow-mind.patch`, SHA-256
-   `3474f5f59eeb1e4615daf6d56c9e77c5d18e702fe0932fd14aa54ac9dbafe8d8`,
+   `347283b5b37495cf2d7f25256d96922a97674012d8d43cbdfdb10551c85fb241`,
    applied directly.
 
 The source tree digest is
-`175491a16f58fce62ba079906633868deed958b5aa88445c22a9e2032332a5ed`;
+`1a49c2c0dfdf52327ce4aab3f959b8bcfc22f4debd32f7df8279b3c5dbc048d2`;
 the rebuilt digest is
-`1ebffd1e56958e7d00c389f89fabcde2422407f16e00446326bdd17abb12bddd`.
+`3216c0360d7e188e86f5926ef1208cd2d40947fbc3f797e6417fa5830767ef83`.
 The only expected materialization differences are the three recorded `.vscode`
 files. The source-side Cargo lock digest is recorded independently under
 `source_file_sha256` as
 `3f1ff14f28ffc173e63d2323bc11ec5b73d3b5f994c168e10272733b3b39444a`.
 
-The exact local reconstruction completed successfully on 2026-09-06. The
+The exact local reconstruction completed successfully on 2026-09-07. The
 provenance unit suite passed 18 tests and the release artifact audit suite passed
 7 tests. Static checks also confirmed the immutable Goal hash, the Goal preimage
 reference allowlist, absence of stale `rust-v0.146.0-alpha.3` references in the
@@ -227,10 +227,30 @@ feature.
 After these corrections, the Goal patch hash remains
 `eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6`. The
 regenerated Shadow patch hash is
-`f3b2834284e53909b0e25bd76e28ec4a807a9f3083a94924bb3820ef9cee6ed7`. The
+`347283b5b37495cf2d7f25256d96922a97674012d8d43cbdfdb10551c85fb241`. The
 18 provenance unit tests, seven release-audit unit tests, exact two-patch
 reconstruction check, stale-reference check, and diff checks pass locally. A
 new remote CI run is still required for compilation and runtime evidence.
+
+GitHub Actions run `34069926136` tested branch commit
+`681d69c7e22a5a9f5f75a4ec201a4919129608d8` on 2026-09-07. Formatting,
+provenance, schema generation/upload, and Bazel-lock generation passed. Rust
+compilation failed before runtime assertions and exposed compatibility drift in
+six authored integration files: removed or renamed session fields and turn-start
+APIs, tuple-backed pending input, non-`PartialEq` turn inputs and response
+envelopes, a stale Guardian test helper signature, a missing Goal stop-reason
+import, and the removed `Op::UserInput` Shadow submission path. The corrective
+delta adapts those call sites to the authoritative `0.153.4` APIs without
+changing Goal retry policy, Shadow ownership semantics, or Guardian product
+behavior.
+
+The same run's generated schema artifact differed in exactly four files: three
+JSON response schemas gained the generated `shadowReport` variant, and the
+precomputed stable export archive changed accordingly. Those exact artifact
+bytes were applied and compared byte-for-byte. Guardian-labelled CI coverage
+remains only shared-upstream regression coverage for a touched retry/error
+boundary. Guardian is not a fork migration feature, patch objective, or separate
+upgrade capability. A replacement CI run is required for compiled behavior.
 
 GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
 with `-D warnings`, app-server schema generation/drift, Bazel lock generation/
@@ -280,7 +300,7 @@ execution evidence owned by GitHub Actions and the release workflow.
 
 ## Local validation results
 
-All permitted local checks passed on 2026-09-06:
+All permitted local checks passed on 2026-09-07:
 
 - `git diff --check -- . ':(exclude)codex-src/**'`.
 - Staging base and cached diff whitespace checks.
@@ -314,3 +334,21 @@ project validation policy.
 
 The task and active Goal must remain open. AC8 and AC9 are unproven until the
 remote Rust/schema/Bazel checks, full CI, and six-target release audit complete.
+
+## Integration history boundary
+
+The upgrade branch may retain multiple reviewable checkpoint commits, including
+temporary `fix:` commits produced while remote CI reveals compatibility drift.
+Those commits are development evidence, not independently meaningful product
+changes. Final integration into `main` must squash the complete range from
+pre-upgrade commit `632cc5b11a7a071bf5a3d45ccecfefa9a56ebcf5` through the
+accepted upgrade result into exactly one atomic commit:
+
+```text
+feat: upgrade Codex baseline to 0.153.4
+```
+
+No upgrade-internal checkpoint or corrective `fix:` commit may enter `main` as
+a separate commit. This preserves the first-principles boundary: the product
+change is one baseline upgrade with the fork's existing Goal and Shadow
+responsibilities integrated onto that baseline.

@@ -155,6 +155,11 @@ Implementation uses reviewable checkpoints: provenance support, pristine source
 snapshot, Goal-only reconstruction, shared core lifecycle integration, Shadow
 and public protocol/TUI migration, and final patch/provenance regeneration. Each
 checkpoint must leave a comprehensible diff and may be reverted independently.
+These checkpoints may remain as multiple commits on the upgrade branch while CI
+and review are in progress. They are not separate product changes. Final
+integration into `main` squashes the complete upgrade range into exactly one
+atomic commit named `feat: upgrade Codex baseline to 0.153.4`; no upgrade-local
+`fix:` or checkpoint commit enters `main` independently.
 
 The final merge remains blocked until GitHub Actions validates behavior and the
 release artifact contract. Rollback is a revert to pre-upgrade commit

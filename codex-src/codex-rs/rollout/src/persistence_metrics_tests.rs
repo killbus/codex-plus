@@ -363,6 +363,7 @@ fn shadow_report_completion_is_persisted_in_both_history_modes() {
             shadow_name: "Reviewer".to_string(),
             content: "Persist this report.".to_string(),
         })),
+        started_at_ms: Some(0),
         completed_at_ms: 0,
     }));
 

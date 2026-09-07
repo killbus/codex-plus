@@ -4,7 +4,7 @@ Audit date: 2026-09-07
 
 ## Status and method
 
-This is the final pre-push full-scope review for the `rust-v0.153.4` migration.
+This is the continuing full-scope review for the `rust-v0.153.4` migration.
 It is an evidence-backed inline review performed by the main session. It is not
 independent-agent evidence. No child agent was dispatched because the current
 platform cannot create and activate a persisted Goal on a child thread before
@@ -25,7 +25,7 @@ Current integration state:
 - Pre-upgrade rollback commit: `632cc5b11a7a071bf5a3d45ccecfefa9a56ebcf5`.
 - Staging tree: `.trellis/.runtime/upgrade-staging`.
 - Staging base HEAD: `5352fbd14d09926a5217353f08a93c756c87c52a`.
-- Staged integration delta: 86 files, 5,938 insertions, and 320 deletions.
+- Staged integration delta: 87 files, 5,933 insertions, and 320 deletions.
 - Ordered patches: immutable Goal patch followed directly by the regenerated
   Shadow integration patch.
 
@@ -160,13 +160,13 @@ peeled source commit. Reconstruction uses this ordered chain:
    applied with deterministic three-way semantics using preimage commit
    `bb6a127bca6c9e190cc9285c4d7bd22c1dff5acb`.
 2. `patches/shadow-mind.patch`, SHA-256
-   `fd4c789e3746940821c2826c0b492d112f96244141fc50d9d8118111f425d66b`,
+   `d5723f568621bff708a05e453c50afdab0d59ba14b3e18fada9c7ff8ba78bd96`,
    applied directly.
 
 The source tree digest is
-`6699400419f965b4fc8ad576621a3246c3ebc7945f06ffe0a715cc3e4ea90084`;
+`03e456e8661fb38e4034a4caf4b63c7d1a7b2a37fae14b3987b3c522d26d9ac1`;
 the rebuilt digest is
-`e144ffd40eb7fcb52bb6cb1565020843644d36686383faf1f19f690a0474b8f6`.
+`b59ba57ac70a37aa5ccd335f130717e5de8c3ceb9ae95eb4483fd6e33748da8e`.
 The only expected materialization differences are the three recorded `.vscode`
 files. The source-side Cargo lock digest is recorded independently under
 `source_file_sha256` as
@@ -461,6 +461,48 @@ vendored source and integration staging tree before regenerating the Shadow
 patch and provenance. The replacement run remains required for all compiled
 behavior and completion evidence.
 
+GitHub Actions run `34085782538` tested exact branch commit
+`7905505c1ea9c4cfdce98d17a3d298671d25aa3b` on 2026-09-07. The Goal retry
+and upstream regression job and the Shadow runtime job passed completely. The
+Rust job passed formatting, provenance reconstruction, stable and experimental
+schema generation/upload, Bazel generation, integrated Goal policy, Shadow,
+app-server, and TUI checks, Shadow and extension-item tests, app-server protocol
+and schema tests, Goal tests, the dropped-stream Goal lifecycle test with
+Shadow enabled, changed TUI integration, lifecycle injection, and Bazel-lock
+drift. It then failed at exactly two gates:
+
+1. `cargo test --locked -p codex-rollout shadow_report` did not compile because
+   the fork-authored Shadow persistence fixture omitted the upstream
+   `ItemCompletedEvent.started_at_ms` field. Other fixtures in the same file
+   use `Some(0)`; the correction applies that same explicit fixture value and
+   does not change runtime persistence behavior.
+2. The schema drift check reported only
+   `app-server-exports-experimental.json.zst`. The generated stable archive
+   already matched the repository at SHA-256
+   `a157ea8a1c27ec21829c16081a1691b6c6fbc46ad00709ae00b8ef6afdfa08fc`.
+   The old experimental archive hash was
+   `05948c1ae7d50d2ec2d01153eeb4eb9b82cf6f7d851acb576ebb5fb201c38b2c`;
+   the authoritative artifact hash is
+   `f8f67ea5864e44d9beb85ac245fa69d8dae011aead778d426e1b9230d444340f`.
+   The generated expanded JSON and TypeScript trees compare byte-for-byte with
+   the checked-in expanded schemas, so the correction copies only the
+   precomputed experimental archive bytes produced by that CI run.
+
+Clippy was skipped only because the rollout gate failed earlier in the same job;
+it remains pending rather than failed. After both corrections were applied to
+`codex-src` and the integration staging tree, the Shadow patch was regenerated
+as exactly `git -C .trellis/.runtime/upgrade-staging diff --binary HEAD`.
+The immutable Goal patch remains
+`eed4c30a1bf83099c2bdd764d83ae3c6719524ba7101867b29c8ccf870559ec6`;
+the new Shadow patch is
+`d5723f568621bff708a05e453c50afdab0d59ba14b3e18fada9c7ff8ba78bd96`.
+Local two-patch reconstruction succeeds with source tree hash
+`03e456e8661fb38e4034a4caf4b63c7d1a7b2a37fae14b3987b3c522d26d9ac1`
+and rebuilt tree hash
+`b59ba57ac70a37aa5ccd335f130717e5de8c3ceb9ae95eb4483fd6e33748da8e`.
+A new exact-SHA CI run remains required; run `34085782538` is not a green CI
+result and must not be represented as one.
+
 GitHub Actions still owns Rust formatting, compilation, package tests, Clippy
 with `-D warnings`, app-server schema generation/drift, Bazel lock generation/
 drift, and the six-target CLI release. The configured targets are Windows x64,
@@ -518,7 +560,7 @@ All permitted local checks passed on 2026-09-07:
 - Exact two-patch `scripts/verify_provenance.py --check` reconstruction.
 - Immutable Goal and regenerated Shadow patch SHA-256 checks.
 - Full staging diff matches `patches/shadow-mind.patch` byte-for-byte, and all
-  86 integration paths match their `codex-src/` counterparts.
+  87 integration paths match their `codex-src/` counterparts.
 - AST enumeration covers 108 `ThreadItem` match expressions with no exhaustive
   19-of-20 omission of `ShadowReport`.
 - Stale old-tag scan and Goal preimage reference allowlist.
@@ -540,7 +582,7 @@ project validation policy.
 | AC6 | Typed wire, identity, UTF-8, ordering, ownership, pending/cancel, origin, persistence, app-server, and TUI tests are present. | Test coverage present; remote execution pending |
 | AC7 | Staged scope treats the complete release as the baseline and limits the fork delta to Goal/Shadow plus shared-boundary compatibility. | Inline scope audit passed; final post-CI diff audit pending |
 | AC8 | CI contains schema/Bazel generation and drift checks plus affected-crate Clippy with `-D warnings`. | Pending GitHub Actions |
-| AC9 | CI and six-target release workflows contain the required gates and artifact audit. | Pending push, CI, and release run |
+| AC9 | CI and six-target release workflows contain the required gates and artifact audit. | Replacement exact-SHA CI and release run pending |
 | AC10 | Current diff is scoped and rollback is documented as `632cc5b...`. | Pre-push audit passed; final post-CI audit pending |
 | AC11 | Inline mode is persisted in `.trellis/config.yaml` and `AGENTS.md`; no child agent was dispatched. | Proven for work to date |
 | AC12 | Persisted active-task artifacts and `AGENTS.md` pass the no-CJK scan. | Proven for current files; rerun after any later edit |
